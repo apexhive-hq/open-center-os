@@ -1,0 +1,29 @@
+{
+  "name": "@apexhive-labs/open-center-os",
+  "version": "1.0.0",
+  "description": "Open-source MIT operations backend for education centers and SME service studios using Node 24 built-in node:sqlite, bilingual POS invoicing, deterministic SVG passes, and atomic check-in credits.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "bin": {
+    "open-center-os": "./dist/src/cli.js"
+  },
+  "main": "./dist/src/app.js",
+  "scripts": {
+    "sync:ui": "node -e \"import('node:fs').then(fs => fs.cpSync('../storefront/public', './public', { recursive: true, force: true }))\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm run build && node --test dist/tests/*.test.js",
+    "start": "node dist/src/cli.js"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}
