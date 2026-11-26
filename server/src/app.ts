@@ -8,6 +8,7 @@ import { DomainError, OpenCenterDb } from './db.js';
 import { renderStudentPassSvg } from './qr-svg.js';
 
 const MAX_BODY_BYTES = 262_144;
+const DEFAULT_MAX_RATE_LIMIT_ENTRIES = 10_000;
 const SESSION_COOKIE_NAME = 'oc_session';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,7 +36,22 @@ function resolvePublicFile(fileName: string): Buffer | null {
   return null;
 }
 
-function resolveAllowedOrigin(req: IncomingMessage, explicitAllowed: string[]): string | null {
+function buildSecurityHeaders(kind: 'html' | 'api' | 'svg' | 'asset'): Record<string, string> {
+  const csp =
+    kind === 'html'
+      ? "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+      : kind === 'asset'
+        ? "default-src 'none'; frame-ancestors 'none'"
+        : "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+  return {
+    'content-security-policy': csp,
+    'x-frame-options': 'DENY',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer'
+  };
+}
+
+function resolveAllowedOrigin(req: IncomingMessage, explicitAllowed: string[], trustProxy: boolean, trustedProxyHops = 1): string | null {
   const origin = req.headers.origin;
   if (!origin || typeof origin !== 'string') return null;
   if (explicitAllowed.includes(origin)) return origin;
@@ -44,11 +60,8 @@ function resolveAllowedOrigin(req: IncomingMessage, explicitAllowed: string[]): 
   if (host) {
     try {
       const parsed = new URL(origin);
-      const isLoopback =
-        parsed.hostname === '127.0.0.1' ||
-        parsed.hostname === 'localhost' ||
-        parsed.hostname === '[::1]';
-      if (isLoopback && parsed.host === host && parsed.protocol === 'http:') {
+      const expectedProto = isHttpsRequest(req, trustProxy, trustedProxyHops) ? 'https:' : 'http:';
+      if (parsed.host.toLowerCase() === host.toLowerCase() && parsed.protocol === expectedProto) {
         return origin;
       }
     } catch {
@@ -58,8 +71,13 @@ function resolveAllowedOrigin(req: IncomingMessage, explicitAllowed: string[]): 
   return null;
 }
 
-function buildCorsHeaders(req: IncomingMessage, explicitAllowed: string[]): Record<string, string> {
-  const allowedOrigin = resolveAllowedOrigin(req, explicitAllowed);
+function buildCorsHeaders(
+  req: IncomingMessage,
+  explicitAllowed: string[],
+  trustProxy: boolean,
+  trustedProxyHops = 1
+): Record<string, string> {
+  const allowedOrigin = resolveAllowedOrigin(req, explicitAllowed, trustProxy, trustedProxyHops);
   if (!allowedOrigin) return { vary: 'Origin' };
   return {
     'access-control-allow-origin': allowedOrigin,
@@ -76,31 +94,67 @@ function sendJson(
   status: number,
   body: unknown,
   explicitAllowed: string[],
+  trustProxy: boolean,
+  trustedProxyHops: number,
   extraHeaders: Record<string, string> = {}
 ): void {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
-    ...buildCorsHeaders(req, explicitAllowed),
+    ...buildSecurityHeaders('api'),
+    ...buildCorsHeaders(req, explicitAllowed, trustProxy, trustedProxyHops),
     ...extraHeaders
   });
   res.end(json);
 }
 
-function sendSvg(req: IncomingMessage, res: ServerResponse, svg: string, explicitAllowed: string[]): void {
+function sendSvg(
+  req: IncomingMessage,
+  res: ServerResponse,
+  svg: string,
+  explicitAllowed: string[],
+  trustProxy: boolean,
+  trustedProxyHops: number
+): void {
   res.writeHead(200, {
     'content-type': 'image/svg+xml; charset=utf-8',
     'cache-control': 'no-store',
-    ...buildCorsHeaders(req, explicitAllowed)
+    ...buildSecurityHeaders('svg'),
+    ...buildCorsHeaders(req, explicitAllowed, trustProxy, trustedProxyHops)
   });
   res.end(svg);
 }
 
-function sha256Equal(a: string, b: string): boolean {
-  const ha = createHash('sha256').update(a, 'utf8').digest();
-  const hb = createHash('sha256').update(b, 'utf8').digest();
-  return timingSafeEqual(ha, hb);
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function getClientIp(req: IncomingMessage, trustProxy: boolean, trustedProxyHops = 1): string {
+  if (trustProxy) {
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string' && xff.trim()) {
+      const hops = xff.split(',').map((s) => s.trim()).filter(Boolean);
+      if (hops.length > 0) {
+        const idx = Math.max(0, hops.length - Math.max(1, trustedProxyHops));
+        return hops[idx];
+      }
+    }
+  }
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function isHttpsRequest(req: IncomingMessage, trustProxy: boolean, trustedProxyHops = 1): boolean {
+  if (Boolean((req.socket as { encrypted?: boolean })?.encrypted)) {
+    return true;
+  }
+  if (!trustProxy) return false;
+  const xfProto = req.headers['x-forwarded-proto'];
+  if (typeof xfProto !== 'string') return false;
+  const hops = xfProto.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (hops.length === 0) return false;
+  const idx = Math.max(0, hops.length - Math.max(1, trustedProxyHops));
+  return hops[idx] === 'https';
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -111,19 +165,35 @@ function parseCookies(header: string | undefined): Record<string, string> {
     if (eq === -1) continue;
     const k = part.slice(0, eq).trim();
     const v = part.slice(eq + 1).trim();
-    if (k) out[k] = decodeURIComponent(v);
+    if (!k) continue;
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      // Ignore malformed percent-encoding instead of crashing with URIError
+      out[k] = v;
+    }
   }
   return out;
 }
 
-function signSessionToken(role: 'admin', secret: string, ttlMs = SESSION_TTL_MS): { token: string; exp: number } {
+function signSessionToken(
+  username: string,
+  role: 'admin',
+  secret: string,
+  ttlMs = SESSION_TTL_MS
+): { token: string; jti: string; exp: number } {
   const exp = Date.now() + ttlMs;
-  const payloadB64 = Buffer.from(JSON.stringify({ sub: 'admin', role, exp }), 'utf8').toString('base64url');
+  const jti = randomBytes(16).toString('hex');
+  const payloadB64 = Buffer.from(JSON.stringify({ sub: username, role, jti, exp }), 'utf8').toString('base64url');
   const sigHex = createHmac('sha256', secret).update(payloadB64).digest('hex');
-  return { token: `${payloadB64}.${sigHex}`, exp };
+  return { token: `${payloadB64}.${sigHex}`, jti, exp };
 }
 
-function verifySessionToken(token: string | undefined, secret: string): { role: 'admin'; exp: number } | null {
+function verifySessionToken(
+  token: string | undefined,
+  secret: string,
+  db: OpenCenterDb
+): { role: 'admin'; exp: number; jti: string } | null {
   if (!token) return null;
   const dot = token.indexOf('.');
   if (dot <= 0) return null;
@@ -139,11 +209,21 @@ function verifySessionToken(token: string | undefined, secret: string): { role: 
     const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as {
       role?: string;
       exp?: number;
+      jti?: string;
     };
-    if (parsed.role !== 'admin' || typeof parsed.exp !== 'number' || parsed.exp <= Date.now()) {
+    if (
+      parsed.role !== 'admin' ||
+      typeof parsed.exp !== 'number' ||
+      parsed.exp <= Date.now() ||
+      typeof parsed.jti !== 'string' ||
+      !parsed.jti
+    ) {
       return null;
     }
-    return { role: 'admin', exp: parsed.exp };
+    if (!db.isSessionActive(parsed.jti, sha256Hex(token))) {
+      return null;
+    }
+    return { role: 'admin', exp: parsed.exp, jti: parsed.jti };
   } catch {
     return null;
   }
@@ -202,7 +282,7 @@ const SchedulePatchSchema = z.object({
 
 const ScheduleEnrollSchema = z.object({
   enrollmentId: z.string().min(3).optional(),
-  passCode: z.string().min(3).max(32).optional()
+  passCode: z.string().min(3).max(64).optional()
 });
 
 const StudentInputSchema = z.object({
@@ -293,14 +373,26 @@ const LeadConvertSchema = z.object({
   paymentMethod: z.enum(['cash', 'fps', 'card', 'usdc', 'bank']).optional()
 });
 
-const ScheduleCreateSchema = z.object({
+const ScheduleCreateSchema = z
+  .object({
+    branchId: z.string().min(3),
+    courseId: z.string().min(3).optional(),
+    courseTitle: z.string().min(1).max(120).optional(),
+    teacherId: z.string().min(3).optional(),
+    teacherName: z.string().min(1).max(120).optional(),
+    dayOfWeek: z.number().int().min(1).max(7),
+    startTime: z.string().min(3).max(10),
+    endTime: z.string().min(3).max(10),
+    room: z.string().max(60).optional()
+  })
+  .refine((d) => Boolean(d.courseId || d.courseTitle), { message: 'courseId or courseTitle is required.' })
+  .refine((d) => Boolean(d.teacherId || d.teacherName), { message: 'teacherId or teacherName is required.' });
+
+const TeacherCreateSchema = z.object({
   branchId: z.string().min(3),
-  courseId: z.string().min(3),
-  teacherId: z.string().min(3),
-  dayOfWeek: z.number().int().min(1).max(7),
-  startTime: z.string().min(3).max(10),
-  endTime: z.string().min(3).max(10),
-  room: z.string().max(60).optional()
+  fullName: z.string().min(1).max(120),
+  fullNameZh: z.string().max(120).optional(),
+  specialty: z.string().max(120).optional()
 });
 
 const ScheduleAttendanceSchema = z.object({
@@ -318,7 +410,7 @@ const CreditAdjustSchema = z.object({
 });
 
 const CheckinSchema = z.object({
-  passCode: z.string().min(4).max(32),
+  passCode: z.string().min(4).max(64),
   slotKey: z.string().min(2).max(64),
   notes: z.string().max(240).optional()
 });
@@ -326,6 +418,7 @@ const CheckinSchema = z.object({
 export interface OpenCenterServer extends http.Server {
   adminPassword: string;
   generatedPasswordUsed: boolean;
+  rateLimitCounts: () => { login: number; portal: number };
 }
 
 export function createOpenCenterServer(options: {
@@ -333,12 +426,25 @@ export function createOpenCenterServer(options: {
   adminPassword?: string;
   sessionSecret?: string;
   allowedOrigins?: string[];
+  trustProxy?: boolean;
+  trustedProxyHops?: number;
+  rateLimit?: {
+    loginMaxFailures?: number;
+    loginWindowMs?: number;
+    loginBaseLockMs?: number;
+    portalMaxRequests?: number;
+    portalWindowMs?: number;
+    maxEntries?: number;
+  };
 }): OpenCenterServer {
   const { db } = options;
   const configuredPassword = options.adminPassword || process.env.OPENCENTER_ADMIN_PASSWORD || '';
   const generatedPasswordUsed = configuredPassword.length === 0;
   const adminPassword = generatedPasswordUsed ? randomBytes(18).toString('base64url') : configuredPassword;
   const sessionSecret = options.sessionSecret || process.env.OPENCENTER_SESSION_SECRET || randomBytes(32).toString('hex');
+  const trustProxy = options.trustProxy ?? (process.env.TRUST_PROXY === 'true');
+  const parsedHops = Number(options.trustedProxyHops ?? process.env.TRUSTED_PROXY_HOPS ?? '1');
+  const trustedProxyHops = Number.isFinite(parsedHops) && parsedHops >= 1 ? Math.floor(parsedHops) : 1;
   const explicitAllowed = (
     options.allowedOrigins ??
     (process.env.OPENCENTER_ALLOWED_ORIGINS || '')
@@ -347,14 +453,115 @@ export function createOpenCenterServer(options: {
       .filter(Boolean)
   );
 
-  const requireAdmin = (req: IncomingMessage): { role: 'admin'; exp: number } => {
+  const loginMaxFailures = options.rateLimit?.loginMaxFailures ?? 5;
+  const loginWindowMs = options.rateLimit?.loginWindowMs ?? 15 * 60_000;
+  const loginBaseLockMs = options.rateLimit?.loginBaseLockMs ?? 30_000;
+  const portalMaxRequests = options.rateLimit?.portalMaxRequests ?? 60;
+  const portalWindowMs = options.rateLimit?.portalWindowMs ?? 60_000;
+  const maxRateLimitEntries = Math.max(2, options.rateLimit?.maxEntries ?? DEFAULT_MAX_RATE_LIMIT_ENTRIES);
+
+  const loginAttempts = new Map<string, { failures: number; windowStart: number; lockedUntil: number }>();
+  const portalRequests = new Map<string, { count: number; windowStart: number }>();
+
+  const pruneAndCapMap = <T>(
+    map: Map<string, T>,
+    isExpired: (val: T) => boolean,
+    incomingKey: string
+  ): void => {
+    if (map.size >= maxRateLimitEntries && !map.has(incomingKey)) {
+      for (const [k, v] of map.entries()) {
+        if (isExpired(v)) {
+          map.delete(k);
+        }
+      }
+      while (map.size >= maxRateLimitEntries) {
+        const oldestKey = map.keys().next().value;
+        if (oldestKey === undefined) break;
+        map.delete(oldestKey);
+      }
+    }
+  };
+
+  db.upsertAdminPasswordSync('admin', adminPassword);
+
+  const checkLoginRateLimit = (ip: string, username: string): number | null => {
+    const now = Date.now();
+    for (const key of [`${ip}::${username}`, `ip:${ip}`]) {
+      const entry = loginAttempts.get(key);
+      if (!entry) continue;
+      if (entry.lockedUntil > now) {
+        return Math.max(1, Math.ceil((entry.lockedUntil - now) / 1000));
+      }
+      if (now - entry.windowStart > loginWindowMs) {
+        loginAttempts.delete(key);
+      }
+    }
+    return null;
+  };
+
+  const recordLoginFailure = (ip: string, username: string): void => {
+    const now = Date.now();
+    const bump = (key: string, maxFailures: number) => {
+      const prev = loginAttempts.get(key);
+      const entry = !prev || now - prev.windowStart > loginWindowMs
+        ? { failures: 0, windowStart: now, lockedUntil: 0 }
+        : prev;
+      entry.failures += 1;
+      if (entry.failures >= maxFailures) {
+        const backoff = Math.min(15 * 60_000, loginBaseLockMs * 2 ** (entry.failures - maxFailures));
+        entry.lockedUntil = now + backoff;
+      }
+      pruneAndCapMap(
+        loginAttempts,
+        (v) => v.lockedUntil <= now && now - v.windowStart > loginWindowMs,
+        key
+      );
+      loginAttempts.delete(key);
+      loginAttempts.set(key, entry);
+    };
+    bump(`${ip}::${username}`, loginMaxFailures);
+    bump(`ip:${ip}`, loginMaxFailures * 3);
+  };
+
+  const clearLoginFailures = (ip: string, username: string): void => {
+    loginAttempts.delete(`${ip}::${username}`);
+  };
+
+  const enforcePortalRateLimit = (req: IncomingMessage): void => {
+    const now = Date.now();
+    const ip = getClientIp(req, trustProxy, trustedProxyHops);
+    const prev = portalRequests.get(ip);
+    const entry = !prev || now - prev.windowStart >= portalWindowMs
+      ? { count: 0, windowStart: now }
+      : prev;
+    entry.count += 1;
+    pruneAndCapMap(
+      portalRequests,
+      (v) => now - v.windowStart >= portalWindowMs,
+      ip
+    );
+    portalRequests.delete(ip);
+    portalRequests.set(ip, entry);
+    if (entry.count > portalMaxRequests) {
+      const retryAfter = Math.max(1, Math.ceil((entry.windowStart + portalWindowMs - now) / 1000));
+      throw new DomainError(429, 'RATE_LIMITED', `Too many requests. Retry after ${retryAfter}s.`, {
+        'retry-after': String(retryAfter)
+      });
+    }
+  };
+
+  const extractSessionToken = (req: IncomingMessage): string | undefined => {
     const authHeader = req.headers.authorization;
     const bearer =
       typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
         ? authHeader.slice(7).trim()
         : undefined;
     const cookies = parseCookies(req.headers.cookie);
-    const session = verifySessionToken(bearer || cookies[SESSION_COOKIE_NAME], sessionSecret);
+    return bearer || cookies[SESSION_COOKIE_NAME];
+  };
+
+  const requireAdmin = (req: IncomingMessage): { role: 'admin'; exp: number; jti: string } => {
+    const session = verifySessionToken(extractSessionToken(req), sessionSecret, db);
     if (!session) {
       throw new DomainError(401, 'UNAUTHORIZED', 'Admin authentication required.');
     }
@@ -362,6 +569,9 @@ export function createOpenCenterServer(options: {
   };
 
   const server = http.createServer(async (req, res) => {
+    const jsonReply = (status: number, body: unknown, extraHeaders?: Record<string, string>) => {
+      sendJson(req, res, status, body, explicitAllowed, trustProxy, trustedProxyHops, extraHeaders);
+    };
     try {
       const url = new URL(req.url || '/', 'http://127.0.0.1');
       const pathname = url.pathname;
@@ -369,18 +579,23 @@ export function createOpenCenterServer(options: {
       const branchIdQuery = url.searchParams.get('branchId') || undefined;
 
       if (method === 'OPTIONS') {
-        const corsHeaders = buildCorsHeaders(req, explicitAllowed);
+        const corsHeaders = buildCorsHeaders(req, explicitAllowed, trustProxy, trustedProxyHops);
         if (!corsHeaders['access-control-allow-origin'] && req.headers.origin) {
-          res.writeHead(403, { vary: 'Origin' });
+          res.writeHead(403, { ...buildSecurityHeaders('api'), vary: 'Origin' });
           res.end();
           return;
         }
-        res.writeHead(204, corsHeaders);
+        res.writeHead(204, { ...buildSecurityHeaders('api'), ...corsHeaders });
         res.end();
         return;
       }
 
-      if (req.headers.origin && !resolveAllowedOrigin(req, explicitAllowed) && method !== 'GET' && method !== 'HEAD') {
+      if (
+        req.headers.origin &&
+        !resolveAllowedOrigin(req, explicitAllowed, trustProxy, trustedProxyHops) &&
+        method !== 'GET' &&
+        method !== 'HEAD'
+      ) {
         throw new DomainError(403, 'ORIGIN_NOT_ALLOWED', 'Cross-origin request blocked by CORS policy.');
       }
 
@@ -388,9 +603,11 @@ export function createOpenCenterServer(options: {
         const asset = STATIC_ALLOWLIST[pathname];
         const buf = resolvePublicFile(asset.file);
         if (buf) {
+          const secKind = asset.file.endsWith('.html') ? 'html' : asset.file.endsWith('.svg') ? 'svg' : 'asset';
           res.writeHead(200, {
             'content-type': asset.contentType,
-            'cache-control': 'no-store'
+            'cache-control': 'no-store',
+            ...buildSecurityHeaders(secKind)
           });
           res.end(buf);
           return;
@@ -398,112 +615,102 @@ export function createOpenCenterServer(options: {
       }
 
       if (method === 'GET' && pathname === '/api/health') {
-        sendJson(
-          req,
-          res,
-          200,
-          {
-            ok: true,
-            service: 'open-center-os',
-            mode: 'sqlite-server',
-            license: 'MIT',
-            authRequired: true
-          },
-          explicitAllowed
-        );
+        jsonReply(200, {
+          ok: true,
+          service: 'open-center-os',
+          mode: 'sqlite-server',
+          license: 'MIT',
+          authRequired: true
+        });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/config') {
-        sendJson(
-          req,
-          res,
-          200,
-          {
-            ok: true,
-            brand: 'ApexHive Labs',
-            productId: 'open-center-os',
-            license: 'MIT',
-            supportEmail: 'apexhive.hq@proton.me',
-            mode: 'sqlite-server',
-            authRequired: true
-          },
-          explicitAllowed
-        );
+        jsonReply(200, {
+          ok: true,
+          brand: 'ApexHive Labs',
+          productId: 'open-center-os',
+          license: 'MIT',
+          supportEmail: 'apexhive.hq@proton.me',
+          mode: 'sqlite-server',
+          authRequired: true
+        });
         return;
       }
 
       if (method === 'POST' && pathname === '/api/auth/login') {
-        const body = (await readJsonBody(req)) as { password?: string };
-        if (!body.password || typeof body.password !== 'string' || !sha256Equal(body.password, adminPassword)) {
+        const body = (await readJsonBody(req)) as { username?: string; password?: string };
+        const username =
+          typeof body.username === 'string' && body.username.trim()
+            ? body.username.trim().toLowerCase()
+            : 'admin';
+        const clientIp = getClientIp(req, trustProxy, trustedProxyHops);
+        const lockedSeconds = checkLoginRateLimit(clientIp, username);
+        if (lockedSeconds !== null) {
+          jsonReply(
+            429,
+            {
+              error: 'LOGIN_RATE_LIMITED',
+              message: `Too many failed login attempts. Retry in ${lockedSeconds}s.`,
+              retryAfterSeconds: lockedSeconds
+            },
+            { 'retry-after': String(lockedSeconds) }
+          );
+          return;
+        }
+        const valid =
+          typeof body.password === 'string' &&
+          body.password.length > 0 &&
+          (await db.verifyAdminLogin(username, body.password));
+        if (!valid) {
+          recordLoginFailure(clientIp, username);
           throw new DomainError(401, 'INVALID_CREDENTIALS', 'Invalid admin password.');
         }
-        const { token, exp } = signSessionToken('admin', sessionSecret);
-        const isHttps =
-          req.headers['x-forwarded-proto'] === 'https' ||
-          Boolean((req.socket as { encrypted?: boolean })?.encrypted);
-        const secureAttr = isHttps ? '; Secure' : '';
+        clearLoginFailures(clientIp, username);
+        const { token, jti, exp } = signSessionToken(username, 'admin', sessionSecret);
+        db.createSession({
+          id: jti,
+          tokenHash: sha256Hex(token),
+          username,
+          role: 'admin',
+          expiresAt: exp
+        });
+        const secureAttr = isHttpsRequest(req, trustProxy, trustedProxyHops) ? '; Secure' : '';
         const cookieVal = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secureAttr}`;
-        sendJson(
-          req,
-          res,
-          200,
-          { ok: true, role: 'admin', token, expiresAt: exp },
-          explicitAllowed,
-          { 'set-cookie': cookieVal }
-        );
+        jsonReply(200, { ok: true, role: 'admin', token, expiresAt: exp }, { 'set-cookie': cookieVal });
         return;
       }
 
       if (method === 'POST' && pathname === '/api/auth/logout') {
-        const isHttps =
-          req.headers['x-forwarded-proto'] === 'https' ||
-          Boolean((req.socket as { encrypted?: boolean })?.encrypted);
-        const secureAttr = isHttps ? '; Secure' : '';
-        sendJson(
-          req,
-          res,
-          200,
-          { ok: true },
-          explicitAllowed,
-          { 'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureAttr}` }
-        );
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/auth/me') {
         const authHeader = req.headers.authorization;
         const bearer =
           typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
             ? authHeader.slice(7).trim()
             : undefined;
         const cookies = parseCookies(req.headers.cookie);
-        const session = verifySessionToken(bearer || cookies[SESSION_COOKIE_NAME], sessionSecret);
-        sendJson(
-          req,
-          res,
+        for (const t of [bearer, cookies[SESSION_COOKIE_NAME]]) {
+          if (t) db.revokeSessionByTokenHash(sha256Hex(t));
+        }
+        const secureAttr = isHttpsRequest(req, trustProxy, trustedProxyHops) ? '; Secure' : '';
+        jsonReply(
           200,
-          { ok: true, authenticated: Boolean(session), role: session?.role ?? null },
-          explicitAllowed
+          { ok: true },
+          { 'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureAttr}` }
         );
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/auth/me') {
+        const session = verifySessionToken(extractSessionToken(req), sessionSecret, db);
+        jsonReply(200, { ok: true, authenticated: Boolean(session), role: session?.role ?? null });
         return;
       }
 
       const passSvgMatch = /^\/api\/(?:pass|passes)\/([A-Za-z0-9_-]+)\.svg$/.exec(pathname);
       if (method === 'GET' && passSvgMatch) {
+        enforcePortalRateLimit(req);
         const enrollment = db.getEnrollmentByPassCode(passSvgMatch[1]);
         if (!enrollment) {
-          if (url.searchParams.has('student') || url.searchParams.has('credits') || url.searchParams.has('course')) {
-            const svg = renderStudentPassSvg({
-              passCode: passSvgMatch[1],
-              studentName: url.searchParams.get('student') || 'Member',
-              branchName: url.searchParams.get('branch') || 'Main Studio',
-              courseTitle: url.searchParams.get('course') || '10-Lesson Package',
-              remainingCredits: Number(url.searchParams.get('credits') ?? '10')
-            });
-            sendSvg(req, res, svg, explicitAllowed);
-            return;
-          }
           throw new DomainError(404, 'PASS_NOT_FOUND', 'Pass not found.');
         }
         const svg = renderStudentPassSvg({
@@ -513,15 +720,16 @@ export function createOpenCenterServer(options: {
           courseTitle: enrollment.courseTitle || 'Package',
           remainingCredits: enrollment.remainingCredits
         });
-        sendSvg(req, res, svg, explicitAllowed);
+        sendSvg(req, res, svg, explicitAllowed, trustProxy, trustedProxyHops);
         return;
       }
 
       const portalMatch = /^\/api\/portal\/([A-Za-z0-9_-]+)$/.exec(pathname);
       if (method === 'GET' && portalMatch) {
+        enforcePortalRateLimit(req);
         const portal = db.getReadOnlyPortal(portalMatch[1]);
         if (!portal) throw new DomainError(404, 'PASS_NOT_FOUND', 'Pass not found.');
-        sendJson(req, res, 200, { ok: true, portal }, explicitAllowed);
+        jsonReply(200, { ok: true, portal });
         return;
       }
 
@@ -531,12 +739,12 @@ export function createOpenCenterServer(options: {
       }
 
       if (method === 'GET' && pathname === '/api/analytics') {
-        sendJson(req, res, 200, { ok: true, ...db.getAnalytics(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, ...db.getAnalytics(branchIdQuery) });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/branches') {
-        sendJson(req, res, 200, { ok: true, branches: db.listBranches() }, explicitAllowed);
+        jsonReply(200, { ok: true, branches: db.listBranches() });
         return;
       }
 
@@ -544,7 +752,7 @@ export function createOpenCenterServer(options: {
         const parsed = BranchInputSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const branch = db.createBranch(parsed.data);
-        sendJson(req, res, 201, { ok: true, branch }, explicitAllowed);
+        jsonReply(201, { ok: true, branch });
         return;
       }
 
@@ -553,12 +761,12 @@ export function createOpenCenterServer(options: {
         const parsed = BranchPatchSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const branch = db.updateBranch(branchPatchMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, branch }, explicitAllowed);
+        jsonReply(200, { ok: true, branch });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/students') {
-        sendJson(req, res, 200, { ok: true, students: db.listStudents(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, students: db.listStudents(branchIdQuery) });
         return;
       }
 
@@ -566,7 +774,7 @@ export function createOpenCenterServer(options: {
         const parsed = StudentInputSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const student = db.createStudent(parsed.data);
-        sendJson(req, res, 201, { ok: true, student }, explicitAllowed);
+        jsonReply(201, { ok: true, student });
         return;
       }
 
@@ -575,13 +783,13 @@ export function createOpenCenterServer(options: {
         const parsed = StudentPatchSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const student = db.updateStudent(studentPatchMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, student }, explicitAllowed);
+        jsonReply(200, { ok: true, student });
         return;
       }
 
       const ledgerMatch = /^\/api\/students\/([A-Za-z0-9_-]+)\/ledger$/.exec(pathname);
       if (method === 'GET' && ledgerMatch) {
-        sendJson(req, res, 200, { ok: true, ...db.getStudentLedger(ledgerMatch[1]) }, explicitAllowed);
+        jsonReply(200, { ok: true, ...db.getStudentLedger(ledgerMatch[1]) });
         return;
       }
 
@@ -593,12 +801,12 @@ export function createOpenCenterServer(options: {
           studentId: adjustMatch[1],
           ...parsed.data
         });
-        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        jsonReply(200, { ok: true, ...result });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/courses') {
-        sendJson(req, res, 200, { ok: true, courses: db.listCourses(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, courses: db.listCourses(branchIdQuery) });
         return;
       }
 
@@ -606,22 +814,16 @@ export function createOpenCenterServer(options: {
         const parsed = CourseInputSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const course = db.createCourse(parsed.data);
-        sendJson(req, res, 201, { ok: true, course }, explicitAllowed);
+        jsonReply(201, { ok: true, course });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/catalog') {
-        sendJson(
-          req,
-          res,
-          200,
-          {
-            ok: true,
-            courses: db.listCourses(branchIdQuery),
-            items: db.listCatalogItems(branchIdQuery)
-          },
-          explicitAllowed
-        );
+        jsonReply(200, {
+          ok: true,
+          courses: db.listCourses(branchIdQuery),
+          items: db.listCatalogItems(branchIdQuery)
+        });
         return;
       }
 
@@ -629,7 +831,7 @@ export function createOpenCenterServer(options: {
         const parsed = CatalogItemSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const item = db.createCatalogItem(parsed.data);
-        sendJson(req, res, 201, { ok: true, item }, explicitAllowed);
+        jsonReply(201, { ok: true, item });
         return;
       }
 
@@ -637,7 +839,7 @@ export function createOpenCenterServer(options: {
         const parsed = EnrollmentPosSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const result = db.createEnrollmentPos(parsed.data);
-        sendJson(req, res, 201, { ok: true, ...result }, explicitAllowed);
+        jsonReply(201, { ok: true, ...result });
         return;
       }
 
@@ -645,12 +847,12 @@ export function createOpenCenterServer(options: {
         const parsed = PosCheckoutSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const result = db.checkoutPosCart(parsed.data);
-        sendJson(req, res, 201, { ok: true, ...result }, explicitAllowed);
+        jsonReply(201, { ok: true, ...result });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/leads') {
-        sendJson(req, res, 200, { ok: true, leads: db.listLeads(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, leads: db.listLeads(branchIdQuery) });
         return;
       }
 
@@ -658,7 +860,7 @@ export function createOpenCenterServer(options: {
         const parsed = LeadCreateSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const lead = db.createLead(parsed.data);
-        sendJson(req, res, 201, { ok: true, lead }, explicitAllowed);
+        jsonReply(201, { ok: true, lead });
         return;
       }
 
@@ -667,7 +869,7 @@ export function createOpenCenterServer(options: {
         const parsed = LeadPatchSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const lead = db.updateLead(leadPatchMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, lead }, explicitAllowed);
+        jsonReply(200, { ok: true, lead });
         return;
       }
 
@@ -676,20 +878,59 @@ export function createOpenCenterServer(options: {
         const parsed = LeadConvertSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const result = db.convertLeadToStudent(leadConvertMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        jsonReply(200, { ok: true, ...result });
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/teachers') {
+        const parsed = TeacherCreateSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const teacher = db.createTeacher(parsed.data);
+        jsonReply(201, { ok: true, teacher });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/schedule') {
-        sendJson(req, res, 200, { ok: true, ...db.getSchedule(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, ...db.getSchedule(branchIdQuery) });
         return;
       }
 
       if (method === 'POST' && pathname === '/api/schedule') {
         const parsed = ScheduleCreateSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const slot = db.createTimetableSlot(parsed.data);
-        sendJson(req, res, 201, { ok: true, slot }, explicitAllowed);
+        const { branchId, dayOfWeek, startTime, endTime, room } = parsed.data;
+        let courseId = parsed.data.courseId;
+        if (!courseId && parsed.data.courseTitle) {
+          const existingCourse = db.findCourseByTitle(branchId, parsed.data.courseTitle);
+          courseId = existingCourse
+            ? existingCourse.id
+            : db.createCourse({
+                branchId,
+                title: parsed.data.courseTitle,
+                defaultCredits: 10,
+                priceCents: 0
+              }).id;
+        }
+        let teacherId = parsed.data.teacherId;
+        if (!teacherId && parsed.data.teacherName) {
+          const existingTeacher = db.findTeacherByName(branchId, parsed.data.teacherName);
+          teacherId = existingTeacher
+            ? existingTeacher.id
+            : db.createTeacher({
+                branchId,
+                fullName: parsed.data.teacherName
+              }).id;
+        }
+        const slot = db.createTimetableSlot({
+          branchId,
+          courseId: courseId!,
+          teacherId: teacherId!,
+          dayOfWeek,
+          startTime,
+          endTime,
+          room
+        });
+        jsonReply(201, { ok: true, slot });
         return;
       }
 
@@ -698,12 +939,12 @@ export function createOpenCenterServer(options: {
         const parsed = SchedulePatchSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const slot = db.updateTimetableSlot(schedSlotMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, slot }, explicitAllowed);
+        jsonReply(200, { ok: true, slot });
         return;
       }
       if (method === 'DELETE' && schedSlotMatch) {
         db.deleteTimetableSlot(schedSlotMatch[1]);
-        sendJson(req, res, 200, { ok: true }, explicitAllowed);
+        jsonReply(200, { ok: true });
         return;
       }
 
@@ -712,7 +953,7 @@ export function createOpenCenterServer(options: {
         const parsed = ScheduleEnrollSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const enrolled = db.enrollStudentInSlot(schedEnrollMatch[1], parsed.data);
-        sendJson(req, res, 200, { ok: true, ...enrolled }, explicitAllowed);
+        jsonReply(200, { ok: true, ...enrolled });
         return;
       }
 
@@ -724,7 +965,7 @@ export function createOpenCenterServer(options: {
           timetableSlotId: schedAttMatch[1],
           ...parsed.data
         });
-        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        jsonReply(200, { ok: true, ...result });
         return;
       }
 
@@ -732,29 +973,30 @@ export function createOpenCenterServer(options: {
         const parsed = CheckinSchema.safeParse(await readJsonBody(req));
         if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
         const result = db.checkInByPass(parsed.data);
-        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        jsonReply(200, { ok: true, ...result });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/renewals') {
         const rawThresh = Number(url.searchParams.get('threshold') || '2');
         const threshold = Number.isFinite(rawThresh) ? Math.max(0, Math.min(20, Math.floor(rawThresh))) : 2;
-        sendJson(req, res, 200, { ok: true, queue: db.getRenewalQueue(threshold, branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, queue: db.getRenewalQueue(threshold, branchIdQuery) });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/invoices') {
-        sendJson(req, res, 200, { ok: true, invoices: db.listInvoices(branchIdQuery) }, explicitAllowed);
+        jsonReply(200, { ok: true, invoices: db.listInvoices(branchIdQuery) });
         return;
       }
 
       if (method === 'GET' && pathname === '/api/invoices/export.csv') {
-        const csv = db.exportInvoicesCsv();
+        const csv = db.exportInvoicesCsv(branchIdQuery);
         res.writeHead(200, {
           'content-type': 'text/csv; charset=utf-8',
           'content-disposition': 'attachment; filename="open-center-invoices.csv"',
           'cache-control': 'no-store',
-          ...buildCorsHeaders(req, explicitAllowed)
+          ...buildSecurityHeaders('api'),
+          ...buildCorsHeaders(req, explicitAllowed, trustProxy, trustedProxyHops)
         });
         res.end(csv);
         return;
@@ -763,7 +1005,7 @@ export function createOpenCenterServer(options: {
       const paidMatch = /^\/api\/invoices\/([A-Za-z0-9_-]+)\/pay$/.exec(pathname);
       if (method === 'POST' && paidMatch) {
         const invoice = db.markInvoicePaid(paidMatch[1]);
-        sendJson(req, res, 200, { ok: true, invoice }, explicitAllowed);
+        jsonReply(200, { ok: true, invoice });
         return;
       }
 
@@ -771,21 +1013,22 @@ export function createOpenCenterServer(options: {
       if (method === 'POST' && voidRefundMatch) {
         const targetStatus = voidRefundMatch[2] === 'refund' ? 'Refunded' : 'Voided';
         const result = db.voidOrRefundInvoice(voidRefundMatch[1], targetStatus);
-        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        jsonReply(200, { ok: true, ...result });
         return;
       }
 
-      sendJson(req, res, 404, { error: 'NOT_FOUND' }, explicitAllowed);
+      jsonReply(404, { error: 'NOT_FOUND' });
     } catch (err) {
       if (err instanceof DomainError) {
-        sendJson(req, res, err.status, { error: err.code, message: err.message }, explicitAllowed);
+        sendJson(req, res, err.status, { error: err.code, message: err.message }, explicitAllowed, trustProxy, trustedProxyHops, err.headers);
         return;
       }
-      sendJson(req, res, 500, { error: 'INTERNAL_ERROR' }, explicitAllowed);
+      sendJson(req, res, 500, { error: 'INTERNAL_ERROR' }, explicitAllowed, trustProxy, trustedProxyHops);
     }
   }) as OpenCenterServer;
 
   server.adminPassword = adminPassword;
   server.generatedPasswordUsed = generatedPasswordUsed;
+  server.rateLimitCounts = () => ({ login: loginAttempts.size, portal: portalRequests.size });
   return server;
 }

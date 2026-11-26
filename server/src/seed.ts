@@ -1,5 +1,13 @@
 import type { OpenCenterDb } from './db.js';
 
+function offsetIsoDate(deltaDays: number): string {
+  const d = new Date(Date.now() + deltaDays * 86_400_000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /**
  * Seeds a realistic Hong Kong learning center & studio dataset
  * if no active branches exist yet. 100% free multi-branch MIT.
@@ -130,7 +138,7 @@ export function seedDemoData(db: OpenCenterDb): boolean {
     source: 'Instagram',
     interestedCourse: 'Piano Grade 5',
     stage: 'Trial Done',
-    trialDate: '2026-11-24',
+    trialDate: offsetIsoDate(-2),
     notes: 'Completed 30-min piano assessment; ready to enroll.'
   });
   db.createLead({
@@ -141,7 +149,7 @@ export function seedDemoData(db: OpenCenterDb): boolean {
     source: 'WhatsApp',
     interestedCourse: 'IELTS Speaking Intensive',
     stage: 'Trial Scheduled',
-    trialDate: '2026-11-27'
+    trialDate: offsetIsoDate(1)
   });
 
   return true;

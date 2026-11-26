@@ -78,13 +78,13 @@
         <section class="hero-compact">
           <h1 id="hero-title">Open-Source Education Center &amp; SME Studio Operations OS</h1>
           <p id="hero-subtitle" class="subtitle">
-            Touch POS cart, bilingual printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.
+            Trilingual UI (EN/繁中/簡中), touch POS cart, bilingual EN/ZH printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.
           </p>
         </section>
 
         <section id="auth-login-bar" class="card" hidden>
-          <h2 style="margin-top:0;">Admin Sign-In Required (SQLite Server Mode)</h2>
-          <p class="subtitle">All student, POS, lead, branch, and invoice API routes are protected by HMAC-SHA256 HttpOnly sessions.</p>
+          <h2 id="auth-login-heading" style="margin-top:0;">Admin Sign-In Required (SQLite Server Mode)</h2>
+          <p id="auth-login-sub" class="subtitle">All student, POS, lead, branch, and invoice API routes are protected by HMAC-SHA256 HttpOnly sessions.</p>
           <form id="auth-login-form" class="inline-form">
             <input id="auth-password-input" class="text-input" type="password" placeholder="Admin password (OPENCENTER_ADMIN_PASSWORD)" autocomplete="current-password" required>
             <button id="auth-login-btn" class="btn btn-primary" type="submit">Sign In</button>
@@ -229,7 +229,7 @@
                       <option value="fps">FPS</option>
                       <option value="card">Card</option>
                       <option value="cash">Cash</option>
-                      <option value="usdc">Base USDC</option>
+                      <option value="usdc">USDC</option>
                     </select>
                   </div>
                   <div style="flex:1 1 130px;">
@@ -334,12 +334,18 @@
                 </div>
                 <div>
                   <label id="checkin-slot-lbl" class="field-label" for="checkin-slot-input">Class / Session Slot Key</label>
-                  <input id="checkin-slot-input" class="text-input" type="text" value="2026-11-25-1400">
+                  <input id="checkin-slot-input" class="text-input" type="text" value="" placeholder="YYYY-MM-DD-HHMM">
                 </div>
                 <div class="toolbar">
                   <button id="checkin-btn" class="btn btn-ok" type="button">Check In (-1 Credit)</button>
                   <button id="qr-scan-btn" class="btn" type="button">Camera QR Scan</button>
+                  <button id="qr-upload-btn" class="btn" type="button">Scan QR Image</button>
+                  <input id="qr-file-input" type="file" accept="image/*" hidden>
                 </div>
+              </div>
+              <div id="qr-camera-wrap" style="margin-top:10px;" hidden>
+                <video id="qr-video" playsinline muted style="width:100%;max-width:320px;border-radius:8px;display:block;margin-bottom:8px;"></video>
+                <button id="qr-stop-btn" class="btn btn-sm" type="button">Stop Camera</button>
               </div>
               <div id="checkin-status" class="status-box" hidden></div>
               <div class="pass-preview">
@@ -391,7 +397,7 @@
       <footer class="site-footer">
         <div class="footer-inner">
           <div id="footer-copy">open-center-os — 100% Free Multi-Branch MIT Operations OS</div>
-          <div><span id="footer-support-lbl">Support:</span> <a href="mailto:apexhive.hq@proton.me">apexhive.hq@proton.me</a> · Tip (Base USDC): <code>0x32eceaC45DBED9E555dAb80346aBd4Ab9C676206</code></div>
+          <div><span id="footer-support-lbl">Support:</span> <a href="mailto:apexhive.hq@proton.me">apexhive.hq@proton.me</a></div>
         </div>
       </footer>
     </div>

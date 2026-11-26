@@ -24,9 +24,9 @@ Usage:
   }
 
   const host = readFlag(args, '--host') || '127.0.0.1';
-  const port = Number(readFlag(args, '--port') || (sub === 'serve' ? '3800' : '3000'));
-  const dataDir = readFlag(args, '--data-dir') || './data';
-  const shouldSeed = args.includes('--seed');
+  const port = Number(readFlag(args, '--port') || '3800');
+  const dataDir = readFlag(args, '--data-dir') || process.env.OPENCENTER_DATA_DIR || './data';
+  const shouldSeed = args.includes('--seed') || process.env.DEV_SEED === 'true';
   const adminPassword = readFlag(args, '--admin-password') || process.env.OPENCENTER_ADMIN_PASSWORD;
   const dbPath = join(dataDir, 'open-center.sqlite');
 

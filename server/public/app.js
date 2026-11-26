@@ -12,9 +12,14 @@
       resetDemo: 'Reset Demo Data',
       githubLink: 'GitHub MIT Repo',
       menuBtn: 'Menu',
+      authLoginHeading: 'Admin Sign-In Required (SQLite Server Mode)',
+      authLoginSub: 'All student, POS, lead, branch, and invoice API routes are protected by HMAC-SHA256 HttpOnly sessions.',
+      authPasswordPh: 'Admin password (OPENCENTER_ADMIN_PASSWORD)',
+      authLoginBtn: 'Sign In',
+      authLogoutBtn: 'Sign Out',
       heroPill: '100% Free Multi-Branch MIT',
       heroTitle: 'Open-Source Education Center & SME Studio Operations OS',
-      heroSubtitle: 'Touch POS cart, bilingual printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.',
+      heroSubtitle: 'Trilingual UI (EN/繁中/簡中), touch POS cart, bilingual EN/ZH printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.',
       navDashboard: 'Dashboard & BI',
       navTimetable: 'Timetable & Teacher Roster',
       navPos: 'POS Cart & Invoices',
@@ -98,6 +103,8 @@
       checkinSlotLbl: 'Class / Session Slot Key',
       checkinBtn: 'Check In (-1 Credit)',
       qrScanBtn: 'Camera QR Scan',
+      qrUploadBtn: 'Scan QR Image',
+      qrStopBtn: 'Stop Camera',
       parentPortalHeading: 'Parent Portal Preview',
       parentPortalLbl: 'Student:',
       parentPortalRemaining: 'Remaining Credits',
@@ -135,6 +142,11 @@
       resetDemo: '重設示範資料',
       githubLink: 'GitHub MIT 原始碼',
       menuBtn: '選單',
+      authLoginHeading: '需要管理員登入（SQLite 伺服器模式）',
+      authLoginSub: '所有學員、POS、CRM 線索、分店及發票 API 均受 HMAC-SHA256 HttpOnly 工作階段保護。',
+      authPasswordPh: '管理員密碼（OPENCENTER_ADMIN_PASSWORD）',
+      authLoginBtn: '登入',
+      authLogoutBtn: '登出',
       heroPill: '無限分店 MIT 永久免費',
       heroTitle: '開源教育中心與預約工作室營運系統',
       heroSubtitle: '觸控購物車 POS、雙語列印收據、每週課表導師點名台、試堂 CRM 轉正、真實二維碼通行證及家長查堂頁。',
@@ -221,6 +233,8 @@
       checkinSlotLbl: '課堂 / 時段編號',
       checkinBtn: '立即簽到扣 1 堂',
       qrScanBtn: '開啟鏡頭掃描 QR',
+      qrUploadBtn: '上傳 QR 圖片掃描',
+      qrStopBtn: '停止鏡頭',
       parentPortalHeading: '家長查堂頁預覽',
       parentPortalLbl: '學生：',
       parentPortalRemaining: '剩餘堂數',
@@ -258,6 +272,11 @@
       resetDemo: '重置演示数据',
       githubLink: 'GitHub MIT 仓库',
       menuBtn: '菜单',
+      authLoginHeading: '需要管理员登录（SQLite 服务器模式）',
+      authLoginSub: '所有学员、POS、CRM 线索、校区及发票 API 均受 HMAC-SHA256 HttpOnly 会话保护。',
+      authPasswordPh: '管理员密码（OPENCENTER_ADMIN_PASSWORD）',
+      authLoginBtn: '登录',
+      authLogoutBtn: '退出登录',
       heroPill: '无限校区 MIT 永久免费',
       heroTitle: '开源教育中心与预约工作室运营系统',
       heroSubtitle: '触控购物车 POS、双语打印收据、每周课表导师点名台、试听 CRM 转正、真实二维码通行证与家长查课页。',
@@ -344,6 +363,8 @@
       checkinSlotLbl: '课堂 / 时段编号',
       checkinBtn: '立即签到扣 1 节',
       qrScanBtn: '开启摄像头扫码',
+      qrUploadBtn: '上传 QR 图片扫码',
+      qrStopBtn: '停止摄像头',
       parentPortalHeading: '家长查课页预览',
       parentPortalLbl: '学员：',
       parentPortalRemaining: '剩余课时',
@@ -383,11 +404,48 @@
     return `PASS-${stem}${String(seq).padStart(2, '0')}`;
   }
 
+  function currentLocalSlotKey(now = new Date()) {
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(Math.floor(now.getMinutes() / 30) * 30).padStart(2, '0');
+    return `${y}-${m}-${d}-${hh}${mm}`;
+  }
+
+  function isoDaysAgo(daysAgo) {
+    const d = new Date(Date.now() - daysAgo * 86_400_000);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function emptyServerState() {
+    return {
+      branchId: '',
+      branches: [],
+      catalog: [],
+      packages: [],
+      invoices: [],
+      leads: [],
+      slots: [],
+      ledger: [],
+      checkedInSlots: {},
+      attendancePresent: 0,
+      attendanceTotal: 0,
+    };
+  }
+
   function defaultState() {
+    const yr = new Date().getFullYear();
+    const d1 = isoDaysAgo(7);
+    const d2 = isoDaysAgo(4);
+    const d3 = isoDaysAgo(5);
+    const d4 = isoDaysAgo(3);
     return {
       branchId: 'CWB',
       branches: [{ id: 'CWB', code: 'CWB', name: 'Causeway Bay Studio (CWB)' }],
-      license: null, // { tier, maxBranches, token }
       catalog: [
         { id: 'piano10', title: 'Piano 10-Lesson Pack', kind: 'course', credits: 10, priceHkd: 3800 },
         { id: 'ielts8', title: 'IELTS Intensive 8-Pack', kind: 'course', credits: 8, priceHkd: 3200 },
@@ -406,7 +464,7 @@
           courseTitle: 'Piano 10-Lesson Pack',
           totalCredits: 10,
           remainingCredits: 3,
-          history: ['2026-11-18 Present (-1)', '2026-11-21 Present (-1)'],
+          history: [`${d1} Present (-1)`, `${d2} Present (-1)`],
         },
         {
           id: 'enr-2',
@@ -419,13 +477,13 @@
           courseTitle: 'IELTS Intensive 8-Pack',
           totalCredits: 8,
           remainingCredits: 6,
-          history: ['2026-11-20 Present (-1)'],
+          history: [`${d3} Present (-1)`],
         },
       ],
       invoices: [
         {
           id: 'inv-1',
-          invoiceNo: 'INV-CWB-2026-0001',
+          invoiceNo: `INV-CWB-${yr}-0001`,
           studentName: 'Alice Chan',
           branch: 'CWB',
           passCodes: ['PASS-ALICE01'],
@@ -434,11 +492,11 @@
           amountHkd: 3800,
           method: 'fps',
           status: 'Paid',
-          createdAt: '2026-11-18',
+          createdAt: d1,
         },
         {
           id: 'inv-2',
-          invoiceNo: 'INV-CWB-2026-0002',
+          invoiceNo: `INV-CWB-${yr}-0002`,
           studentName: 'Ben Lau',
           branch: 'CWB',
           passCodes: ['PASS-BEN02'],
@@ -447,7 +505,7 @@
           amountHkd: 3200,
           method: 'card',
           status: 'Paid',
-          createdAt: '2026-11-20',
+          createdAt: d3,
         },
       ],
       leads: [
@@ -460,7 +518,7 @@
         { id: 'SAT-1030', dayOfWeek: 6, day: 'Sat 10:30', startTime: '10:30', endTime: '11:30', title: 'Reformer Core', room: 'Studio 1', teacher: 'Ms Cheung', passes: ['PASS-ALICE01', 'PASS-BEN02'] },
         { id: 'SUN-1400', dayOfWeek: 7, day: 'Sun 14:00', startTime: '14:00', endTime: '15:00', title: 'Kids Ensemble', room: 'Room A', teacher: 'Miss Chan', passes: ['PASS-ALICE01'] },
       ],
-      ledger: [{ ts: '2026-11-22', passCode: 'PASS-ALICE01', delta: '+1', note: 'Initial makeup buffer' }],
+      ledger: [{ ts: d4, passCode: 'PASS-ALICE01', delta: '+1', note: 'Initial makeup buffer' }],
       checkedInSlots: {},
       attendancePresent: 17,
       attendanceTotal: 18,
@@ -581,6 +639,7 @@
     const catalog = [
       ...(catalogRes.courses || []).map((c) => ({
         id: c.id,
+        branchId: c.branchId,
         title: c.title,
         kind: 'course',
         credits: c.defaultCredits,
@@ -588,6 +647,7 @@
       })),
       ...(catalogRes.items || []).map((it) => ({
         id: it.id,
+        branchId: it.branchId,
         title: it.title,
         kind: it.kind,
         credits: it.defaultCredits,
@@ -689,6 +749,11 @@
     $('reset-demo-btn').textContent = t.resetDemo;
     $('github-repo-link').textContent = t.githubLink;
     $('sidebar-toggle-btn').textContent = t.menuBtn;
+    if ($('auth-login-heading')) $('auth-login-heading').textContent = t.authLoginHeading;
+    if ($('auth-login-sub')) $('auth-login-sub').textContent = t.authLoginSub;
+    if ($('auth-password-input')) $('auth-password-input').placeholder = t.authPasswordPh;
+    if ($('auth-login-btn')) $('auth-login-btn').textContent = t.authLoginBtn;
+    if ($('auth-logout-btn')) $('auth-logout-btn').textContent = t.authLogoutBtn;
     $('hero-pill').textContent = t.heroPill;
     $('hero-title').textContent = t.heroTitle;
     $('hero-subtitle').textContent = t.heroSubtitle;
@@ -775,6 +840,8 @@
     $('checkin-slot-lbl').textContent = t.checkinSlotLbl;
     $('checkin-btn').textContent = t.checkinBtn;
     $('qr-scan-btn').textContent = t.qrScanBtn;
+    if ($('qr-upload-btn')) $('qr-upload-btn').textContent = t.qrUploadBtn;
+    if ($('qr-stop-btn')) $('qr-stop-btn').textContent = t.qrStopBtn;
     $('parent-portal-heading').textContent = t.parentPortalHeading;
     $('parent-portal-lbl').textContent = t.parentPortalLbl;
 
@@ -1337,14 +1404,20 @@
     const passCode = ($('checkin-pass-input')?.value || 'PASS-ALICE01').trim();
     const pkg = state.packages.find((p) => p.passCode === passCode) || state.packages[0];
     const img = $('pass-svg-img');
-    if (img && pkg) {
-      const qs = new URLSearchParams({
-        student: pkg.studentName,
-        course: pkg.courseTitle,
-        credits: String(pkg.remainingCredits),
-        branch: pkg.branch || 'CWB',
-      });
-      img.src = `/api/pass/${encodeURIComponent(pkg.passCode)}.svg?${qs.toString()}`;
+    if (img) {
+      if ((serverBackendActive && !serverAuthenticated) || !pkg) {
+        img.hidden = true;
+        img.removeAttribute('src');
+      } else {
+        img.hidden = false;
+        if (serverBackendActive) {
+          img.src = `/api/pass/${encodeURIComponent(pkg.passCode)}.svg`;
+        } else {
+          const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+          const previewSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="380" height="120" viewBox="0 0 380 120"><rect width="380" height="120" rx="10" fill="#f8fafc" stroke="#cbd5e1"/><text x="16" y="30" font-family="sans-serif" font-size="11" font-weight="700" fill="#475569">SANDBOX PASS PREVIEW</text><text x="16" y="56" font-family="sans-serif" font-size="16" font-weight="700" fill="#0f172a">${esc(pkg.studentName)}</text><text x="16" y="78" font-family="sans-serif" font-size="12" fill="#334155">${esc(pkg.courseTitle)}</text><text x="16" y="98" font-family="sans-serif" font-size="11" fill="#64748b">${esc(pkg.passCode)} · ${Number(pkg.remainingCredits) || 0} left</text></svg>`;
+          img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(previewSvg)}`;
+        }
+      }
     }
 
     const sel = $('parent-portal-select');
@@ -1362,17 +1435,21 @@
 
     const selectedPkg = state.packages.find((p) => p.passCode === (sel?.value || '')) || state.packages[0];
     const pp = $('parent-portal-preview');
-    if (pp && selectedPkg) {
-      const badges = (selectedPkg.history || []).slice(0, 4).map((h) => el('div', 'pill pill-ok', h));
-      const wrap = el('div', 'form-grid');
-      wrap.appendChild(el('strong', '', `${t.parentPortalHeading} — ${selectedPkg.studentName}`));
-      wrap.appendChild(el('div', 'muted', `${selectedPkg.courseTitle} (${selectedPkg.branch || 'CWB'})`));
-      wrap.appendChild(el('div', '', `${t.parentPortalRemaining}: ${selectedPkg.remainingCredits} / ${selectedPkg.totalCredits}`));
-      wrap.appendChild(el('div', 'muted', t.parentPortalHistory));
-      const badgeRow = el('div', 'toolbar');
-      badgeRow.append(...badges);
-      wrap.appendChild(badgeRow);
-      pp.replaceChildren(wrap);
+    if (pp) {
+      if (!selectedPkg || (serverBackendActive && !serverAuthenticated)) {
+        pp.replaceChildren();
+      } else {
+        const badges = (selectedPkg.history || []).slice(0, 4).map((h) => el('div', 'pill pill-ok', h));
+        const wrap = el('div', 'form-grid');
+        wrap.appendChild(el('strong', '', `${t.parentPortalHeading} — ${selectedPkg.studentName}`));
+        wrap.appendChild(el('div', 'muted', `${selectedPkg.courseTitle} (${selectedPkg.branch || 'CWB'})`));
+        wrap.appendChild(el('div', '', `${t.parentPortalRemaining}: ${selectedPkg.remainingCredits} / ${selectedPkg.totalCredits}`));
+        wrap.appendChild(el('div', 'muted', t.parentPortalHistory));
+        const badgeRow = el('div', 'toolbar');
+        badgeRow.append(...badges);
+        wrap.appendChild(badgeRow);
+        pp.replaceChildren(wrap);
+      }
     }
   }
 
@@ -1472,6 +1549,57 @@
     return true;
   }
 
+  let qrCameraStream = null;
+  let qrScanRaf = 0;
+
+  function stopQrCamera() {
+    if (qrScanRaf) {
+      cancelAnimationFrame(qrScanRaf);
+      qrScanRaf = 0;
+    }
+    if (qrCameraStream) {
+      for (const track of qrCameraStream.getTracks()) {
+        track.stop();
+      }
+      qrCameraStream = null;
+    }
+    const video = $('qr-video');
+    if (video) video.srcObject = null;
+    const wrap = $('qr-camera-wrap');
+    if (wrap) wrap.hidden = true;
+  }
+
+  function applyScannedPassCode(rawValue) {
+    const code = String(rawValue || '').trim();
+    if (!code) return false;
+    if ($('checkin-pass-input')) $('checkin-pass-input').value = code;
+    renderQrAndParentPortal();
+    showBox($('checkin-status'), `Scanned pass ${code} — click Check In to deduct 1 credit.`, 'ok');
+    return true;
+  }
+
+  function clearAuthenticatedState() {
+    stopQrCamera();
+    state = emptyServerState();
+    cart = [];
+    serverAnalytics = null;
+    serverTeachers = [];
+    activeSlotId = null;
+    activeCreditPass = null;
+    editingStudentPass = null;
+    for (const modalId of ['roster-drawer', 'receipt-modal', 'credit-modal', 'student-edit-modal', 'pos-status', 'checkin-status']) {
+      if ($(modalId)) $(modalId).hidden = true;
+    }
+    if ($('pos-student-input')) $('pos-student-input').value = '';
+    if ($('pos-phone-input')) $('pos-phone-input').value = '';
+    if ($('checkin-pass-input')) $('checkin-pass-input').value = '';
+    if ($('pass-svg-img')) {
+      $('pass-svg-img').hidden = true;
+      $('pass-svg-img').removeAttribute('src');
+    }
+    renderAll();
+  }
+
   function updateAuthUi() {
     const loginBar = $('auth-login-bar');
     const logoutBtn = $('auth-logout-btn');
@@ -1494,6 +1622,8 @@
         updateAuthUi();
         if (serverAuthenticated) {
           await syncFromServer();
+        } else {
+          clearAuthenticatedState();
         }
         applyLang(lang);
       }
@@ -1541,16 +1671,28 @@
     if (!title) return;
 
     if (serverBackendActive) {
-      const courseId = state.catalog.find((c) => c.kind === 'course')?.id;
-      const teacherId = serverTeachers[0]?.id;
-      if (courseId && teacherId) {
-        await apiJson('/api/schedule', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ branchId: state.branchId, courseId, teacherId, dayOfWeek, startTime, endTime, room }),
-        });
-        await syncFromServer();
-      }
+      const normTitle = title.toLowerCase();
+      const normTeacher = teacherName.toLowerCase();
+      const matchedCourse = state.catalog.find(
+        (c) => c.kind === 'course' && (!c.branchId || c.branchId === state.branchId) && c.title.trim().toLowerCase() === normTitle
+      );
+      const matchedTeacher = serverTeachers.find(
+        (tc) => (!tc.branchId || tc.branchId === state.branchId) && String(tc.fullName || '').trim().toLowerCase() === normTeacher
+      );
+      await apiJson('/api/schedule', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          branchId: state.branchId,
+          ...(matchedCourse ? { courseId: matchedCourse.id } : { courseTitle: title }),
+          ...(matchedTeacher ? { teacherId: matchedTeacher.id } : { teacherName: teacherName || 'Staff Instructor' }),
+          dayOfWeek,
+          startTime,
+          endTime,
+          room,
+        }),
+      });
+      await syncFromServer();
     } else {
       state.slots.push({
         id: `SLOT-${Date.now()}`,
@@ -1700,7 +1842,7 @@
     const totalCredits = cart.reduce((s, c) => s + c.credits * c.qty, 0);
     const branchCode = bCodeForId(state.branches, state.branchId);
     const passCode = makeSafePassCode(studentName, phone, state.packages.length + 1);
-    const invoiceNo = `INV-${branchCode}-2026-${String(state.invoices.length + 1).padStart(4, '0')}`;
+    const invoiceNo = `INV-${branchCode}-${new Date().getFullYear()}-${String(state.invoices.length + 1).padStart(4, '0')}`;
     const passCodes = [];
 
     if (totalCredits > 0) {
@@ -1860,7 +2002,7 @@
 
   $('checkin-btn')?.addEventListener('click', async () => {
     const passCode = $('checkin-pass-input').value.trim();
-    const slotKey = $('checkin-slot-input').value.trim() || '2026-11-25-1400';
+    const slotKey = $('checkin-slot-input').value.trim() || currentLocalSlotKey();
     if (serverBackendActive) {
       try {
         const out = await apiJson('/api/checkin', {
@@ -1881,11 +2023,85 @@
     }
   });
 
-  $('qr-scan-btn')?.addEventListener('click', () => {
-    if ('BarcodeDetector' in window) {
-      showBox($('checkin-status'), 'BarcodeDetector ready — enter pass code or scan camera stream.', 'ok');
-    } else {
-      showBox($('checkin-status'), 'Camera BarcodeDetector unavailable in headless browser — use Pass Code input above.', '');
+  $('qr-scan-btn')?.addEventListener('click', async () => {
+    const statusBox = $('checkin-status');
+    if (qrCameraStream) {
+      stopQrCamera();
+      return;
+    }
+    if (!('BarcodeDetector' in window) || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showBox(statusBox, 'Live camera BarcodeDetector is unavailable in this browser — enter Pass Code above or use Scan QR Image.', '');
+      return;
+    }
+    try {
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      qrCameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const video = $('qr-video');
+      const wrap = $('qr-camera-wrap');
+      if (!video || !wrap) {
+        stopQrCamera();
+        return;
+      }
+      video.srcObject = qrCameraStream;
+      await video.play();
+      wrap.hidden = false;
+      showBox(statusBox, 'Camera active — point a student QR pass at the lens.', 'ok');
+
+      const tick = async () => {
+        if (!qrCameraStream) return;
+        try {
+          if (video.readyState >= 2) {
+            const codes = await detector.detect(video);
+            if (codes && codes.length > 0 && codes[0].rawValue) {
+              stopQrCamera();
+              applyScannedPassCode(codes[0].rawValue);
+              return;
+            }
+          }
+        } catch {
+          // continue scanning frames
+        }
+        qrScanRaf = requestAnimationFrame(tick);
+      };
+      qrScanRaf = requestAnimationFrame(tick);
+    } catch (err) {
+      stopQrCamera();
+      showBox(statusBox, `Camera access failed (${err?.message || 'permission denied'}). Enter Pass Code above or use Scan QR Image.`, 'error');
+    }
+  });
+
+  $('qr-stop-btn')?.addEventListener('click', () => {
+    stopQrCamera();
+  });
+
+  $('qr-upload-btn')?.addEventListener('click', () => {
+    $('qr-file-input')?.click();
+  });
+
+  $('qr-file-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const statusBox = $('checkin-status');
+    if (!('BarcodeDetector' in window)) {
+      showBox(statusBox, 'BarcodeDetector API unavailable in this browser — enter Pass Code manually above.', 'error');
+      return;
+    }
+    try {
+      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+      const bitmap = await createImageBitmap(file);
+      try {
+        const codes = await detector.detect(bitmap);
+        if (codes && codes.length > 0 && codes[0].rawValue) {
+          applyScannedPassCode(codes[0].rawValue);
+        } else {
+          showBox(statusBox, 'No QR code detected in the selected image.', 'error');
+        }
+      } finally {
+        bitmap.close();
+      }
+    } catch (err) {
+      showBox(statusBox, err?.message || 'Failed to decode QR image.', 'error');
     }
   });
 
@@ -1956,8 +2172,12 @@
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
     serverAuthenticated = false;
     updateAuthUi();
+    clearAuthenticatedState();
   });
 
+  if ($('checkin-slot-input') && !$('checkin-slot-input').value.trim()) {
+    $('checkin-slot-input').value = currentLocalSlotKey();
+  }
   applyLang(lang);
   initBackend();
 })();

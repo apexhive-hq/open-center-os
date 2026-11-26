@@ -1,7 +1,7 @@
 {
   "name": "open-center-os",
   "version": "2.2.0",
-  "description": "Open-source MIT multi-branch operations server for education centers and SME service studios using Node 24 built-in node:sqlite, cookie/Bearer auth, bilingual POS invoicing, and deterministic SVG QR passes.",
+  "description": "Open-source MIT multi-branch operations server for education centers and SME service studios using Node 24 built-in node:sqlite, scrypt/session auth, trilingual UI (EN/繁中/簡中), bilingual EN/ZH receipts, and deterministic SVG QR passes.",
   "license": "MIT",
   "type": "module",
   "engines": {

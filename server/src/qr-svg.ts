@@ -46,7 +46,7 @@ export function renderStudentPassSvg(input: {
   courseTitle: string;
   remainingCredits: number;
 }): string {
-  const safeCode = cleanLabel(input.passCode, 32) || 'PASS-0000';
+  const safeCode = cleanLabel(input.passCode, 48) || 'PASS-0000';
   const rawPassPayload = (input.passCode || 'PASS-0000').replace(/[^A-Za-z0-9_.:/-]/g, '').slice(0, 64) || 'PASS-0000';
   const safeStudent = cleanLabel(input.studentName, 36) || 'Member';
   const safeBranch = cleanLabel(input.branchName, 36) || 'Main Branch';

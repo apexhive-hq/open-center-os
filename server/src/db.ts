@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, scrypt, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -22,11 +22,13 @@ import type {
 export class DomainError extends Error {
   readonly status: number;
   readonly code: string;
+  readonly headers?: Record<string, string>;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, headers?: Record<string, string>) {
     super(message);
     this.status = status;
     this.code = code;
+    this.headers = headers;
   }
 }
 
@@ -35,7 +37,59 @@ function makeId(prefix: string): string {
 }
 
 function makePassCode(): string {
-  return `PASS-${randomBytes(4).toString('hex').toUpperCase()}`;
+  return `PASS-${randomBytes(16).toString('hex').toUpperCase()}`;
+}
+
+function scryptDerive(password: string, saltHex: string, keyLen: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, saltHex, keyLen, { N: 16384, r: 8, p: 1 }, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
+
+export async function hashPasswordScrypt(password: string): Promise<string> {
+  const saltHex = randomBytes(16).toString('hex');
+  const derived = await scryptDerive(password, saltHex, 64);
+  return `scrypt$${saltHex}$${derived.toString('hex')}`;
+}
+
+export function hashPasswordScryptSync(password: string): string {
+  const saltHex = randomBytes(16).toString('hex');
+  const derived = scryptSync(password, saltHex, 64, { N: 16384, r: 8, p: 1 });
+  return `scrypt$${saltHex}$${derived.toString('hex')}`;
+}
+
+export async function verifyPasswordHash(
+  password: string,
+  storedHash: string
+): Promise<{ valid: boolean; needsRehash: boolean }> {
+  if (storedHash.startsWith('scrypt$')) {
+    const parts = storedHash.split('$');
+    if (parts.length !== 3) return { valid: false, needsRehash: false };
+    const [, saltHex, keyHex] = parts;
+    if (!saltHex || !/^[0-9a-f]+$/i.test(keyHex)) {
+      return { valid: false, needsRehash: false };
+    }
+    const expected = Buffer.from(keyHex, 'hex');
+    const actual = await scryptDerive(password, saltHex, expected.byteLength);
+    if (actual.byteLength !== expected.byteLength) {
+      return { valid: false, needsRehash: false };
+    }
+    return { valid: timingSafeEqual(actual, expected), needsRehash: false };
+  }
+
+  // Legacy unsalted SHA-256 backward-migration support
+  const legacyHex = storedHash.startsWith('sha256$') ? storedHash.slice(7) : storedHash;
+  if (/^[0-9a-f]{64}$/i.test(legacyHex)) {
+    const expected = Buffer.from(legacyHex, 'hex');
+    const actual = createHash('sha256').update(password, 'utf8').digest();
+    const valid = actual.byteLength === expected.byteLength && timingSafeEqual(actual, expected);
+    return { valid, needsRehash: valid };
+  }
+
+  return { valid: false, needsRehash: false };
 }
 
 function escapeCsvCell(raw: unknown): string {
@@ -222,7 +276,103 @@ export class OpenCenterDb {
         ref_id TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'admin',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        username TEXT NOT NULL DEFAULT 'admin',
+        role TEXT NOT NULL DEFAULT 'admin',
+        expires_at INTEGER NOT NULL,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
+  }
+
+  upsertAdminPasswordSync(username: string, password: string): void {
+    const normalized = username.trim().toLowerCase() || 'admin';
+    const hash = hashPasswordScryptSync(password);
+    const now = new Date().toISOString();
+    const existing = this.db.prepare('SELECT id FROM admin_users WHERE username = ?').get(normalized);
+    if (existing) {
+      this.db
+        .prepare('UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?')
+        .run(hash, now, normalized);
+      return;
+    }
+    this.db
+      .prepare('INSERT INTO admin_users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(makeId('usr'), normalized, hash, 'admin', now, now);
+  }
+
+  async upsertAdminPassword(username: string, password: string): Promise<void> {
+    const normalized = username.trim().toLowerCase() || 'admin';
+    const hash = await hashPasswordScrypt(password);
+    const now = new Date().toISOString();
+    const existing = this.db.prepare('SELECT id FROM admin_users WHERE username = ?').get(normalized);
+    if (existing) {
+      this.db
+        .prepare('UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?')
+        .run(hash, now, normalized);
+      return;
+    }
+    this.db
+      .prepare('INSERT INTO admin_users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(makeId('usr'), normalized, hash, 'admin', now, now);
+  }
+
+  async verifyAdminLogin(username: string, password: string): Promise<boolean> {
+    const normalized = username.trim().toLowerCase() || 'admin';
+    const row = this.db
+      .prepare('SELECT password_hash FROM admin_users WHERE username = ?')
+      .get(normalized) as { password_hash?: string } | undefined;
+    if (!row || typeof row.password_hash !== 'string') return false;
+    const check = await verifyPasswordHash(password, row.password_hash);
+    if (check.valid && check.needsRehash) {
+      const upgraded = await hashPasswordScrypt(password);
+      this.db
+        .prepare('UPDATE admin_users SET password_hash = ?, updated_at = ? WHERE username = ?')
+        .run(upgraded, new Date().toISOString(), normalized);
+    }
+    return check.valid;
+  }
+
+  createSession(params: {
+    id: string;
+    tokenHash: string;
+    username: string;
+    role: 'admin';
+    expiresAt: number;
+  }): void {
+    const now = Date.now();
+    this.db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now);
+    this.db
+      .prepare('INSERT INTO sessions (id, token_hash, username, role, expires_at, revoked_at, created_at) VALUES (?, ?, ?, ?, ?, NULL, ?)')
+      .run(params.id, params.tokenHash, params.username, params.role, params.expiresAt, new Date(now).toISOString());
+  }
+
+  isSessionActive(id: string, tokenHash: string): boolean {
+    const row = this.db
+      .prepare('SELECT revoked_at, expires_at FROM sessions WHERE id = ? AND token_hash = ?')
+      .get(id, tokenHash) as { revoked_at?: string | null; expires_at?: number } | undefined;
+    if (!row) return false;
+    if (row.revoked_at !== null && row.revoked_at !== undefined) return false;
+    return Number(row.expires_at ?? 0) > Date.now();
+  }
+
+  revokeSessionByTokenHash(tokenHash: string): void {
+    this.db
+      .prepare('UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL')
+      .run(new Date().toISOString(), tokenHash);
   }
 
   private runInTransaction<T>(fn: () => T): T {
@@ -477,6 +627,36 @@ export class OpenCenterDb {
       currency: String(r.currency),
       createdAt: String(r.created_at)
     }));
+  }
+
+  findCourseByTitle(branchId: string, title: string): CourseRecord | null {
+    const normalized = title.trim().toLowerCase();
+    return (
+      this.listCourses(branchId).find(
+        (c) => c.title.trim().toLowerCase() === normalized || c.titleZh.trim().toLowerCase() === normalized
+      ) ?? null
+    );
+  }
+
+  findTeacherByName(branchId: string, fullName: string): TeacherRecord | null {
+    const normalized = fullName.trim().toLowerCase();
+    const rows = this.db.prepare('SELECT * FROM teachers WHERE branch_id = ? ORDER BY created_at ASC').all(branchId);
+    for (const r of rows) {
+      if (
+        String(r.full_name).trim().toLowerCase() === normalized ||
+        String(r.full_name_zh).trim().toLowerCase() === normalized
+      ) {
+        return {
+          id: String(r.id),
+          branchId: String(r.branch_id),
+          fullName: String(r.full_name),
+          fullNameZh: String(r.full_name_zh),
+          specialty: String(r.specialty),
+          createdAt: String(r.created_at)
+        };
+      }
+    }
+    return null;
   }
 
   createCourse(input: {
@@ -1002,7 +1182,7 @@ export class OpenCenterDb {
     return rows.map((r) => this.mapInvoiceRow(r));
   }
 
-  exportInvoicesCsv(): string {
+  exportInvoicesCsv(branchId?: string): string {
     const headers = [
       'invoiceNumber',
       'issuedDate',
@@ -1017,7 +1197,7 @@ export class OpenCenterDb {
       'status'
     ];
     const lines = [headers.join(',')];
-    for (const inv of this.listInvoices()) {
+    for (const inv of this.listInvoices(branchId)) {
       lines.push(
         [
           inv.invoiceNumber,
@@ -1224,12 +1404,17 @@ export class OpenCenterDb {
     const existing = this.db.prepare('SELECT * FROM timetable_slots WHERE id = ?').get(slotId);
     if (!existing) throw new DomainError(404, 'SCHEDULE_SLOT_NOT_FOUND', 'Timetable slot not found.');
 
+    const slotBranchId = String(existing.branch_id);
     const nextCourseId = patch.courseId ?? String(existing.course_id);
     const nextTeacherId = patch.teacherId ?? String(existing.teacher_id);
-    const course = this.db.prepare('SELECT id, title, title_zh FROM courses WHERE id = ?').get(nextCourseId);
-    if (!course) throw new DomainError(404, 'COURSE_NOT_FOUND', 'Course not found.');
-    const teacher = this.db.prepare('SELECT id, full_name, full_name_zh FROM teachers WHERE id = ?').get(nextTeacherId);
-    if (!teacher) throw new DomainError(404, 'TEACHER_NOT_FOUND', 'Teacher not found.');
+    const course = this.db
+      .prepare('SELECT id, title, title_zh FROM courses WHERE id = ? AND branch_id = ?')
+      .get(nextCourseId, slotBranchId);
+    if (!course) throw new DomainError(404, 'COURSE_NOT_FOUND', 'Course not found in branch.');
+    const teacher = this.db
+      .prepare('SELECT id, full_name, full_name_zh FROM teachers WHERE id = ? AND branch_id = ?')
+      .get(nextTeacherId, slotBranchId);
+    if (!teacher) throw new DomainError(404, 'TEACHER_NOT_FOUND', 'Teacher not found in branch.');
 
     const dayOfWeek = patch.dayOfWeek ?? Number(existing.day_of_week);
     const startTime = patch.startTime !== undefined ? patch.startTime.trim() : String(existing.start_time);
@@ -1265,13 +1450,18 @@ export class OpenCenterDb {
   }
 
   enrollStudentInSlot(slotId: string, input: { enrollmentId?: string; passCode?: string }): { slotId: string; enrollmentId: string } {
-    const slotRow = this.db.prepare('SELECT id FROM timetable_slots WHERE id = ?').get(slotId);
+    const slotRow = this.db.prepare('SELECT id, branch_id FROM timetable_slots WHERE id = ?').get(slotId);
     if (!slotRow) throw new DomainError(404, 'SCHEDULE_SLOT_NOT_FOUND', 'Timetable slot not found.');
 
     const enrRow = input.enrollmentId
-      ? this.db.prepare('SELECT id FROM enrollments WHERE id = ?').get(input.enrollmentId)
-      : this.db.prepare('SELECT id FROM enrollments WHERE pass_code = ?').get(String(input.passCode ?? '').trim().toUpperCase());
+      ? this.db.prepare('SELECT id, branch_id FROM enrollments WHERE id = ?').get(input.enrollmentId)
+      : this.db
+          .prepare('SELECT id, branch_id FROM enrollments WHERE pass_code = ?')
+          .get(String(input.passCode ?? '').trim().toUpperCase());
     if (!enrRow) throw new DomainError(404, 'PASS_NOT_FOUND', 'Enrollment pass not found.');
+    if (String(enrRow.branch_id) !== String(slotRow.branch_id)) {
+      throw new DomainError(409, 'BRANCH_MISMATCH', 'Enrollment pass belongs to a different branch than this timetable slot.');
+    }
 
     const enrollmentId = String(enrRow.id);
     this.db
@@ -1356,7 +1546,7 @@ export class OpenCenterDb {
     status: AttendanceStatus;
     notes?: string;
   }): { enrollment: EnrollmentRecord; attendance: AttendanceRecord; ledgerEntry: CreditLedgerEntry | null } {
-    const slotRow = this.db.prepare('SELECT id FROM timetable_slots WHERE id = ?').get(input.timetableSlotId);
+    const slotRow = this.db.prepare('SELECT id, branch_id FROM timetable_slots WHERE id = ?').get(input.timetableSlotId);
     if (!slotRow) throw new DomainError(404, 'SCHEDULE_SLOT_NOT_FOUND', 'Timetable slot not found.');
 
     return this.runInTransaction(() => {
@@ -1385,6 +1575,9 @@ export class OpenCenterDb {
             .get(String(input.passCode ?? '').trim().toUpperCase());
 
       if (!enrRow) throw new DomainError(404, 'PASS_NOT_FOUND', 'Enrollment not found.');
+      if (String(enrRow.branch_id) !== String(slotRow.branch_id)) {
+        throw new DomainError(409, 'BRANCH_MISMATCH', 'Enrollment pass belongs to a different branch than this timetable slot.');
+      }
 
       const enrollmentId = String(enrRow.id);
       const passCode = String(enrRow.pass_code);
@@ -1717,7 +1910,13 @@ export class OpenCenterDb {
     const activePackages = students.reduce((s, st) => s + st.enrollments.length, 0);
     const totalRemainingCredits = students.reduce((s, st) => s + st.totalRemainingCredits, 0);
 
-    const attRows = this.db.prepare('SELECT attendance_status FROM attendance').all();
+    const attRows = branchId
+      ? this.db
+          .prepare(
+            'SELECT a.attendance_status FROM attendance a JOIN enrollments e ON e.id = a.enrollment_id WHERE e.branch_id = ?'
+          )
+          .all(branchId)
+      : this.db.prepare('SELECT attendance_status FROM attendance').all();
     const presentCount = attRows.filter((a) => a.attendance_status === 'Present' || a.attendance_status === 'Makeup').length;
     const attendanceRatePct = attRows.length > 0 ? Math.round((presentCount / attRows.length) * 100) : 100;
 
