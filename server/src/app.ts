@@ -439,7 +439,11 @@ export function createOpenCenterServer(options: {
           throw new DomainError(401, 'INVALID_CREDENTIALS', 'Invalid admin password.');
         }
         const { token, exp } = signSessionToken('admin', sessionSecret);
-        const cookieVal = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
+        const isHttps =
+          req.headers['x-forwarded-proto'] === 'https' ||
+          Boolean((req.socket as { encrypted?: boolean })?.encrypted);
+        const secureAttr = isHttps ? '; Secure' : '';
+        const cookieVal = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secureAttr}`;
         sendJson(
           req,
           res,
@@ -452,13 +456,17 @@ export function createOpenCenterServer(options: {
       }
 
       if (method === 'POST' && pathname === '/api/auth/logout') {
+        const isHttps =
+          req.headers['x-forwarded-proto'] === 'https' ||
+          Boolean((req.socket as { encrypted?: boolean })?.encrypted);
+        const secureAttr = isHttps ? '; Secure' : '';
         sendJson(
           req,
           res,
           200,
           { ok: true },
           explicitAllowed,
-          { 'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0` }
+          { 'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureAttr}` }
         );
         return;
       }
