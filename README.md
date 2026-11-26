@@ -1,59 +1,45 @@
 # open-center-os
 
-Open-source MIT full-suite operations server (`node:sqlite` on Node >= 24) and multi-view SaaS App Shell (`BI Analytics`, `Weekly Timetable & Teacher Roster`, `Multi-Item Touch POS Cart`, `Student & CRM Lead Pipeline`, `ISO QR Pass & Parent Portal`, `Multi-Branch Licensing`) for learning centers, tutoring studios, and appointment-based service businesses.
-
-Single-branch deployments run unrestricted under the MIT license at `$0` forever with zero native C++ addons.
+**100% Free & Open-Source (MIT)** multi-branch operations server (`node:sqlite` on Node >= 24) and trilingual operations UI (`BI Analytics`, `Weekly Timetable & Teacher Roster`, `Multi-Item POS Cart`, `Student & CRM Lead Pipeline`, `ISO QR Pass & Parent Portal`, `Unlimited Free Multi-Branch`) for learning centers, tutoring studios, and appointment-based service businesses.
 
 ```
 +-----------------------------------------------------------------------------+
-|                        open-center-os v2.1 Architecture                      |
+|                        open-center-os v2.2 Architecture                      |
 +-----------------------------------------------------------------------------+
-|  6-View App Shell (UI)     --->  Node 24 HTTP + node:sqlite Server (server/) |
-|  - BI Analytics & Bar Chart      - CRM Leads (Inquiry -> Trial -> Convert)   |
-|  - Weekly Timetable & Roster     - Roster Check-In (Present/Absent/Makeup)   |
-|  - Multi-Item POS Cart & Print   - Mark Paid / Void / Refund & INV-YYYYMMDD  |
-|  - Student Directory & Ledger    - Edit Student, Credit Audit & Catalog      |
-|  - Camera-Scannable ISO QR Pass  - qrcode-generator ISO SVG + Parent Portal  |
-|  - 100% Trilingual (繁/简/EN)    - 1 ($0) -> 2-3 ($499) -> 4+ ($999) Gate    |
+|  Web App Shell (server/public) ---> Node 24 HTTP + node:sqlite (server/src)  |
+|  - Cookie / Bearer Admin Auth       - HMAC-SHA256 Sessions + Strict CORS     |
+|  - BI Analytics & Bar Chart         - CRM Leads (Inquiry -> Trial -> Convert)|
+|  - Weekly Timetable & Roster        - Roster Check-In (Present/Absent/Makeup)|
+|  - Multi-Item POS Cart & Print      - Mark Paid / Void / Refund & INV-No     |
+|  - Unlimited Multi-Branch (MIT)     - qrcode-generator ISO SVG + Portal      |
 +-----------------------------------------------------------------------------+
 ```
 
-## Features
+## Security & Authentication Model
 
-- **Pure Node >= 24 + Built-In `node:sqlite`**: Zero `better-sqlite3` or native compiler toolchain required. Serves the embedded web UI directly at `/` (`node dist/src/cli.js serve --seed`).
-- **CRM Trial Pipeline (`查詢 -> 預約試堂 -> 一鍵轉正`)**: Track walk-in/social inquiries through trial booking and convert directly into enrolled student records (`POST /api/leads/:id/convert`).
-- **Weekly Timetable & Teacher Roster Check-In**: Add/edit/delete slots, attach student passes (`POST /api/schedule/:id/enroll`), and mark `Present (-1)`, `Absent (0)`, or `Makeup (+1)` atomically in `credit_ledger`.
-- **Multi-Item Touch POS Cart & Bilingual Invoices**: Create custom courses or books/materials (`POST /api/catalog`), mix items with fixed or `%` discounts (`POST /api/pos/checkout`), `Mark Paid` / `Void` / `Refund` invoices with automatic unused-credit reversal, print receipts, and export sanitized RFC 4180 CSV ledgers.
-- **Real ISO Scannable QR Pass (`qrcode-generator`) & Parent Portal**: Deterministic ISO/IEC 18004 SVG passes (`GET /api/pass/:passCode.svg`) paired with read-only client/parent portal lookup (`GET /api/portal/:passCode`).
+- **Session / Bearer Admin Auth:** Mutating and PII routes (`/api/branches`, `/api/students`, `/api/leads`, `/api/invoices`, `/api/pos/checkout`, `/api/schedule`, `/api/checkin`, `/api/analytics`) require an authenticated admin session (`POST /api/auth/login` issuing an `HttpOnly; SameSite=Lax` HMAC-SHA256 cookie and Bearer token; unauthenticated calls return `401`).
+- **Auto-Generated Per-Instance Password:** Set `OPENCENTER_ADMIN_PASSWORD` in production (or `--admin-password`). When unset, a random CSPRNG password is generated at startup and logged once.
+- **Locked CORS:** Wildcard `Access-Control-Allow-Origin: *` is disabled. Cross-origin access is permitted only for loopback same-origin requests or origins explicitly listed in `OPENCENTER_ALLOWED_ORIGINS`.
+- **Public Read-Only Endpoints:** `/api/health`, `/api/config`, `/api/auth/me`, `/api/portal/:passCode` (masked contact + credit balance only), and `/api/pass/:passCode.svg`.
 
-## Quickstart (Local MIT Server)
+## Quickstart (`MIT` Free Forever)
 
 ```bash
 git clone https://github.com/apexhive-hq/open-center-os.git
 cd open-center-os/server
 pnpm install --ignore-scripts
-pnpm run sync:ui
 pnpm run build
-node dist/src/cli.js serve --seed --port 3800 --data-dir ./data
+OPENCENTER_ADMIN_PASSWORD="change-me-local" node dist/src/cli.js serve --seed --port 3800 --data-dir ./data
 ```
 
-Open `http://127.0.0.1:3800/` to run the full local SQLite-backed application.
+Open `http://127.0.0.1:3800/` and sign in with your admin password.
 
-Run the integration test suites:
+Run the integration test suite:
 
 ```bash
 cd open-center-os/server && pnpm test
-cd open-center-os/storefront && pnpm test
 ```
 
-## Open-Core Licensing Model
+---
 
-- **Single-Branch MIT (`0 USDC` Forever)**: `1` active branch with unlimited students, CRM leads, timetable slots, multi-item POS invoices, ISO QR passes, check-ins, and CSV exports.
-- **Voluntary Community Donations (`15 USDC` / `49 USDC`)**: Optional supporter (`15 USDC`) or patron (`49 USDC`) donation with an Ed25519 supporter token.
-- **Growth Multi-Branch Team (`499 USDC` Lifetime)**: Unlocks **up to `3` branches** (`maxBranches: 3`) via offline Ed25519 verification (`node dist/src/cli.js activate --token "<token>"`).
-- **Enterprise Unlimited Chain (`999 USDC` Lifetime)**: Unlocks **unlimited (`4+`) branches** (`maxBranches: null`) and chain-wide commercial rights.
-
-## License & Commercial Support
-
-Licensed under the [MIT License](LICENSE).
-For multi-branch commercial support or questions, contact `apexhive.hq@proton.me`.
+If `open-center-os` helped your center or studio, Base USDC tips are welcome at `0x32eceaC45DBED9E555dAb80346aBd4Ab9C676206`. Support: `apexhive.hq@proton.me`.

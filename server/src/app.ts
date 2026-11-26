@@ -1,24 +1,19 @@
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { DomainError, OpenCenterDb } from './db.js';
-import {
-  DEFAULT_OPEN_CENTER_PUBLIC_KEY_SPKI_B64,
-  getMaxAllowedBranches,
-  isMultiBranchAuthorized,
-  loadActiveLicense,
-  saveActivatedLicense
-} from './license.js';
 import { renderStudentPassSvg } from './qr-svg.js';
 
 const MAX_BODY_BYTES = 262_144;
+const SESSION_COOKIE_NAME = 'oc_session';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CANDIDATE_PUBLIC_DIRS = [
   join(__dirname, '..', 'public'),
-  join(__dirname, '..', '..', 'public'),
-  join(__dirname, '..', '..', '..', 'storefront', 'public')
+  join(__dirname, '..', '..', 'public')
 ];
 
 const STATIC_ALLOWLIST: Record<string, { file: string; contentType: string }> = {
@@ -40,24 +35,118 @@ function resolvePublicFile(fileName: string): Buffer | null {
   return null;
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function resolveAllowedOrigin(req: IncomingMessage, explicitAllowed: string[]): string | null {
+  const origin = req.headers.origin;
+  if (!origin || typeof origin !== 'string') return null;
+  if (explicitAllowed.includes(origin)) return origin;
+
+  const host = req.headers.host;
+  if (host) {
+    try {
+      const parsed = new URL(origin);
+      const isLoopback =
+        parsed.hostname === '127.0.0.1' ||
+        parsed.hostname === 'localhost' ||
+        parsed.hostname === '[::1]';
+      if (isLoopback && parsed.host === host && parsed.protocol === 'http:') {
+        return origin;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function buildCorsHeaders(req: IncomingMessage, explicitAllowed: string[]): Record<string, string> {
+  const allowedOrigin = resolveAllowedOrigin(req, explicitAllowed);
+  if (!allowedOrigin) return { vary: 'Origin' };
+  return {
+    'access-control-allow-origin': allowedOrigin,
+    'access-control-allow-credentials': 'true',
+    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+    'access-control-allow-headers': 'Content-Type, Authorization',
+    vary: 'Origin'
+  };
+}
+
+function sendJson(
+  req: IncomingMessage,
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  explicitAllowed: string[],
+  extraHeaders: Record<string, string> = {}
+): void {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
-    'access-control-allow-origin': '*',
-    'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'access-control-allow-headers': 'Content-Type, X-OpenCenter-License'
+    'cache-control': 'no-store',
+    ...buildCorsHeaders(req, explicitAllowed),
+    ...extraHeaders
   });
   res.end(json);
 }
 
-function sendSvg(res: ServerResponse, svg: string): void {
+function sendSvg(req: IncomingMessage, res: ServerResponse, svg: string, explicitAllowed: string[]): void {
   res.writeHead(200, {
     'content-type': 'image/svg+xml; charset=utf-8',
     'cache-control': 'no-store',
-    'access-control-allow-origin': '*'
+    ...buildCorsHeaders(req, explicitAllowed)
   });
   res.end(svg);
+}
+
+function sha256Equal(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a, 'utf8').digest();
+  const hb = createHash('sha256').update(b, 'utf8').digest();
+  return timingSafeEqual(ha, hb);
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k) out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+function signSessionToken(role: 'admin', secret: string, ttlMs = SESSION_TTL_MS): { token: string; exp: number } {
+  const exp = Date.now() + ttlMs;
+  const payloadB64 = Buffer.from(JSON.stringify({ sub: 'admin', role, exp }), 'utf8').toString('base64url');
+  const sigHex = createHmac('sha256', secret).update(payloadB64).digest('hex');
+  return { token: `${payloadB64}.${sigHex}`, exp };
+}
+
+function verifySessionToken(token: string | undefined, secret: string): { role: 'admin'; exp: number } | null {
+  if (!token) return null;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+  const payloadB64 = token.slice(0, dot);
+  const sigHex = token.slice(dot + 1);
+  if (!/^[0-9a-f]{64}$/i.test(sigHex)) return null;
+  const expected = createHmac('sha256', secret).update(payloadB64).digest();
+  const actual = Buffer.from(sigHex, 'hex');
+  if (expected.byteLength !== actual.byteLength || !timingSafeEqual(expected, actual)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8')) as {
+      role?: string;
+      exp?: number;
+    };
+    if (parsed.role !== 'admin' || typeof parsed.exp !== 'number' || parsed.exp <= Date.now()) {
+      return null;
+    }
+    return { role: 'admin', exp: parsed.exp };
+  } catch {
+    return null;
+  }
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -234,35 +323,66 @@ const CheckinSchema = z.object({
   notes: z.string().max(240).optional()
 });
 
+export interface OpenCenterServer extends http.Server {
+  adminPassword: string;
+  generatedPasswordUsed: boolean;
+}
+
 export function createOpenCenterServer(options: {
   db: OpenCenterDb;
-  homeDir?: string;
-  publicKeySpkiB64?: string;
-}) {
-  const { db, homeDir, publicKeySpkiB64 } = options;
+  adminPassword?: string;
+  sessionSecret?: string;
+  allowedOrigins?: string[];
+}): OpenCenterServer {
+  const { db } = options;
+  const configuredPassword = options.adminPassword || process.env.OPENCENTER_ADMIN_PASSWORD || '';
+  const generatedPasswordUsed = configuredPassword.length === 0;
+  const adminPassword = generatedPasswordUsed ? randomBytes(18).toString('base64url') : configuredPassword;
+  const sessionSecret = options.sessionSecret || process.env.OPENCENTER_SESSION_SECRET || randomBytes(32).toString('hex');
+  const explicitAllowed = (
+    options.allowedOrigins ??
+    (process.env.OPENCENTER_ALLOWED_ORIGINS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
 
-  const getEffectiveLicense = (req: IncomingMessage) => {
-    const headerToken = req.headers['x-opencenter-license'];
-    const inlineToken = typeof headerToken === 'string' ? headerToken.trim() : undefined;
-    return loadActiveLicense({ homeDir, publicKeySpkiB64, inlineToken });
+  const requireAdmin = (req: IncomingMessage): { role: 'admin'; exp: number } => {
+    const authHeader = req.headers.authorization;
+    const bearer =
+      typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : undefined;
+    const cookies = parseCookies(req.headers.cookie);
+    const session = verifySessionToken(bearer || cookies[SESSION_COOKIE_NAME], sessionSecret);
+    if (!session) {
+      throw new DomainError(401, 'UNAUTHORIZED', 'Admin authentication required.');
+    }
+    return session;
   };
 
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204, {
-          'access-control-allow-origin': '*',
-          'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-          'access-control-allow-headers': 'Content-Type, X-OpenCenter-License'
-        });
-        res.end();
-        return;
-      }
-
       const url = new URL(req.url || '/', 'http://127.0.0.1');
       const pathname = url.pathname;
       const method = req.method || 'GET';
       const branchIdQuery = url.searchParams.get('branchId') || undefined;
+
+      if (method === 'OPTIONS') {
+        const corsHeaders = buildCorsHeaders(req, explicitAllowed);
+        if (!corsHeaders['access-control-allow-origin'] && req.headers.origin) {
+          res.writeHead(403, { vary: 'Origin' });
+          res.end();
+          return;
+        }
+        res.writeHead(204, corsHeaders);
+        res.end();
+        return;
+      }
+
+      if (req.headers.origin && !resolveAllowedOrigin(req, explicitAllowed) && method !== 'GET' && method !== 'HEAD') {
+        throw new DomainError(403, 'ORIGIN_NOT_ALLOWED', 'Cross-origin request blocked by CORS policy.');
+      }
 
       if (method === 'GET' && STATIC_ALLOWLIST[pathname]) {
         const asset = STATIC_ALLOWLIST[pathname];
@@ -278,295 +398,86 @@ export function createOpenCenterServer(options: {
       }
 
       if (method === 'GET' && pathname === '/api/health') {
-        const license = getEffectiveLicense(req);
-        sendJson(res, 200, {
-          ok: true,
-          service: 'open-center-os',
-          mode: 'sqlite-server',
-          licenseModel: 'MIT Single-Branch Free ($0)',
-          activeBranches: db.countActiveBranches(),
-          maxAllowedBranches: getMaxAllowedBranches(license),
-          multiBranchAuthorized: isMultiBranchAuthorized(license),
-          activeLicense: license && license.valid && license.payload
-            ? { tier: license.payload.tier, maxBranches: getMaxAllowedBranches(license) }
-            : null
-        });
+        sendJson(
+          req,
+          res,
+          200,
+          {
+            ok: true,
+            service: 'open-center-os',
+            mode: 'sqlite-server',
+            license: 'MIT',
+            authRequired: true
+          },
+          explicitAllowed
+        );
         return;
       }
 
       if (method === 'GET' && pathname === '/api/config') {
-        sendJson(res, 200, {
-          ok: true,
-          brand: 'ApexHive Labs',
-          productId: 'open-center-os',
-          tokenPrefix: 'OPENCEN-PRO-v1.',
-          licensePublicKeySpkiB64:
-            publicKeySpkiB64 || process.env.OPEN_CENTER_PUBLIC_KEY || DEFAULT_OPEN_CENTER_PUBLIC_KEY_SPKI_B64,
-          supportEmail: 'apexhive.hq@proton.me',
-          mode: 'sqlite-server'
-        });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/analytics') {
-        sendJson(res, 200, { ok: true, ...db.getAnalytics(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/license/activate') {
-        const body = (await readJsonBody(req)) as { token?: string };
-        if (!body.token || typeof body.token !== 'string') {
-          throw new DomainError(400, 'MISSING_TOKEN', 'Provide license token string.');
-        }
-        try {
-          const { verification } = saveActivatedLicense(body.token, { homeDir, publicKeySpkiB64 });
-          sendJson(res, 200, {
+        sendJson(
+          req,
+          res,
+          200,
+          {
             ok: true,
-            tier: verification.payload?.tier,
-            maxBranches: getMaxAllowedBranches(verification),
-            multiBranchAuthorized: isMultiBranchAuthorized(verification)
-          });
-        } catch (err) {
-          throw new DomainError(403, 'INVALID_LICENSE_TOKEN', err instanceof Error ? err.message : 'Invalid token.');
+            brand: 'ApexHive Labs',
+            productId: 'open-center-os',
+            license: 'MIT',
+            supportEmail: 'apexhive.hq@proton.me',
+            mode: 'sqlite-server',
+            authRequired: true
+          },
+          explicitAllowed
+        );
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/auth/login') {
+        const body = (await readJsonBody(req)) as { password?: string };
+        if (!body.password || typeof body.password !== 'string' || !sha256Equal(body.password, adminPassword)) {
+          throw new DomainError(401, 'INVALID_CREDENTIALS', 'Invalid admin password.');
         }
+        const { token, exp } = signSessionToken('admin', sessionSecret);
+        const cookieVal = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`;
+        sendJson(
+          req,
+          res,
+          200,
+          { ok: true, role: 'admin', token, expiresAt: exp },
+          explicitAllowed,
+          { 'set-cookie': cookieVal }
+        );
         return;
       }
 
-      if (method === 'GET' && pathname === '/api/branches') {
-        sendJson(res, 200, { ok: true, branches: db.listBranches() });
+      if (method === 'POST' && pathname === '/api/auth/logout') {
+        sendJson(
+          req,
+          res,
+          200,
+          { ok: true },
+          explicitAllowed,
+          { 'set-cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0` }
+        );
         return;
       }
 
-      if (method === 'POST' && pathname === '/api/branches') {
-        const parsed = BranchInputSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-
-        const license = getEffectiveLicense(req);
-        if (req.headers['x-opencenter-license'] && (!license || !license.valid)) {
-          throw new DomainError(403, 'INVALID_LICENSE_TOKEN', license?.reason ?? 'Invalid license token.');
-        }
-        const branch = db.createBranch(parsed.data, getMaxAllowedBranches(license));
-        sendJson(res, 201, { ok: true, branch });
-        return;
-      }
-
-      const branchPatchMatch = /^\/api\/branches\/([A-Za-z0-9_-]+)$/.exec(pathname);
-      if (method === 'PATCH' && branchPatchMatch) {
-        const parsed = BranchPatchSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const branch = db.updateBranch(branchPatchMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, branch });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/students') {
-        sendJson(res, 200, { ok: true, students: db.listStudents(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/students') {
-        const parsed = StudentInputSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const student = db.createStudent(parsed.data);
-        sendJson(res, 201, { ok: true, student });
-        return;
-      }
-
-      const studentPatchMatch = /^\/api\/students\/([A-Za-z0-9_-]+)$/.exec(pathname);
-      if (method === 'PATCH' && studentPatchMatch) {
-        const parsed = StudentPatchSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const student = db.updateStudent(studentPatchMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, student });
-        return;
-      }
-
-      const ledgerMatch = /^\/api\/students\/([A-Za-z0-9_-]+)\/ledger$/.exec(pathname);
-      if (method === 'GET' && ledgerMatch) {
-        sendJson(res, 200, { ok: true, ...db.getStudentLedger(ledgerMatch[1]) });
-        return;
-      }
-
-      const adjustMatch = /^\/api\/students\/([A-Za-z0-9_-]+)\/adjust$/.exec(pathname);
-      if (method === 'POST' && adjustMatch) {
-        const parsed = CreditAdjustSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.adjustStudentCredits({
-          studentId: adjustMatch[1],
-          ...parsed.data
-        });
-        sendJson(res, 200, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/courses') {
-        sendJson(res, 200, { ok: true, courses: db.listCourses(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/courses') {
-        const parsed = CourseInputSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const course = db.createCourse(parsed.data);
-        sendJson(res, 201, { ok: true, course });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/catalog') {
-        sendJson(res, 200, {
-          ok: true,
-          courses: db.listCourses(branchIdQuery),
-          items: db.listCatalogItems(branchIdQuery)
-        });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/catalog') {
-        const parsed = CatalogItemSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const item = db.createCatalogItem(parsed.data);
-        sendJson(res, 201, { ok: true, item });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/enrollments') {
-        const parsed = EnrollmentPosSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.createEnrollmentPos(parsed.data);
-        sendJson(res, 201, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/pos/checkout') {
-        const parsed = PosCheckoutSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.checkoutPosCart(parsed.data);
-        sendJson(res, 201, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/leads') {
-        sendJson(res, 200, { ok: true, leads: db.listLeads(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/leads') {
-        const parsed = LeadCreateSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const lead = db.createLead(parsed.data);
-        sendJson(res, 201, { ok: true, lead });
-        return;
-      }
-
-      const leadPatchMatch = /^\/api\/leads\/([A-Za-z0-9_-]+)$/.exec(pathname);
-      if (method === 'PATCH' && leadPatchMatch) {
-        const parsed = LeadPatchSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const lead = db.updateLead(leadPatchMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, lead });
-        return;
-      }
-
-      const leadConvertMatch = /^\/api\/leads\/([A-Za-z0-9_-]+)\/convert$/.exec(pathname);
-      if (method === 'POST' && leadConvertMatch) {
-        const parsed = LeadConvertSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.convertLeadToStudent(leadConvertMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/schedule') {
-        sendJson(res, 200, { ok: true, ...db.getSchedule(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/schedule') {
-        const parsed = ScheduleCreateSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const slot = db.createTimetableSlot(parsed.data);
-        sendJson(res, 201, { ok: true, slot });
-        return;
-      }
-
-      const schedSlotMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)$/.exec(pathname);
-      if (method === 'PATCH' && schedSlotMatch) {
-        const parsed = SchedulePatchSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const slot = db.updateTimetableSlot(schedSlotMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, slot });
-        return;
-      }
-      if (method === 'DELETE' && schedSlotMatch) {
-        db.deleteTimetableSlot(schedSlotMatch[1]);
-        sendJson(res, 200, { ok: true });
-        return;
-      }
-
-      const schedEnrollMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)\/enroll$/.exec(pathname);
-      if (method === 'POST' && schedEnrollMatch) {
-        const parsed = ScheduleEnrollSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const enrolled = db.enrollStudentInSlot(schedEnrollMatch[1], parsed.data);
-        sendJson(res, 200, { ok: true, ...enrolled });
-        return;
-      }
-
-      const schedAttMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)\/attendance$/.exec(pathname);
-      if (method === 'POST' && schedAttMatch) {
-        const parsed = ScheduleAttendanceSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.markScheduleAttendance({
-          timetableSlotId: schedAttMatch[1],
-          ...parsed.data
-        });
-        sendJson(res, 200, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'POST' && pathname === '/api/checkin') {
-        const parsed = CheckinSchema.safeParse(await readJsonBody(req));
-        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
-        const result = db.checkInByPass(parsed.data);
-        sendJson(res, 200, { ok: true, ...result });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/renewals') {
-        const rawThresh = Number(url.searchParams.get('threshold') || '2');
-        const threshold = Number.isFinite(rawThresh) ? Math.max(0, Math.min(20, Math.floor(rawThresh))) : 2;
-        sendJson(res, 200, { ok: true, queue: db.getRenewalQueue(threshold, branchIdQuery) });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/invoices') {
-        sendJson(res, 200, { ok: true, invoices: db.listInvoices(branchIdQuery) });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/invoices/export.csv') {
-        const csv = db.exportInvoicesCsv();
-        res.writeHead(200, {
-          'content-type': 'text/csv; charset=utf-8',
-          'content-disposition': 'attachment; filename="open-center-invoices.csv"',
-          'cache-control': 'no-store'
-        });
-        res.end(csv);
-        return;
-      }
-
-      const paidMatch = /^\/api\/invoices\/([A-Za-z0-9_-]+)\/pay$/.exec(pathname);
-      if (method === 'POST' && paidMatch) {
-        const invoice = db.markInvoicePaid(paidMatch[1]);
-        sendJson(res, 200, { ok: true, invoice });
-        return;
-      }
-
-      const voidRefundMatch = /^\/api\/invoices\/([A-Za-z0-9_-]+)\/(void|refund)$/.exec(pathname);
-      if (method === 'POST' && voidRefundMatch) {
-        const targetStatus = voidRefundMatch[2] === 'refund' ? 'Refunded' : 'Voided';
-        const result = db.voidOrRefundInvoice(voidRefundMatch[1], targetStatus);
-        sendJson(res, 200, { ok: true, ...result });
+      if (method === 'GET' && pathname === '/api/auth/me') {
+        const authHeader = req.headers.authorization;
+        const bearer =
+          typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+            ? authHeader.slice(7).trim()
+            : undefined;
+        const cookies = parseCookies(req.headers.cookie);
+        const session = verifySessionToken(bearer || cookies[SESSION_COOKIE_NAME], sessionSecret);
+        sendJson(
+          req,
+          res,
+          200,
+          { ok: true, authenticated: Boolean(session), role: session?.role ?? null },
+          explicitAllowed
+        );
         return;
       }
 
@@ -582,7 +493,7 @@ export function createOpenCenterServer(options: {
               courseTitle: url.searchParams.get('course') || '10-Lesson Package',
               remainingCredits: Number(url.searchParams.get('credits') ?? '10')
             });
-            sendSvg(res, svg);
+            sendSvg(req, res, svg, explicitAllowed);
             return;
           }
           throw new DomainError(404, 'PASS_NOT_FOUND', 'Pass not found.');
@@ -594,7 +505,7 @@ export function createOpenCenterServer(options: {
           courseTitle: enrollment.courseTitle || 'Package',
           remainingCredits: enrollment.remainingCredits
         });
-        sendSvg(res, svg);
+        sendSvg(req, res, svg, explicitAllowed);
         return;
       }
 
@@ -602,17 +513,271 @@ export function createOpenCenterServer(options: {
       if (method === 'GET' && portalMatch) {
         const portal = db.getReadOnlyPortal(portalMatch[1]);
         if (!portal) throw new DomainError(404, 'PASS_NOT_FOUND', 'Pass not found.');
-        sendJson(res, 200, { ok: true, portal });
+        sendJson(req, res, 200, { ok: true, portal }, explicitAllowed);
         return;
       }
 
-      sendJson(res, 404, { error: 'NOT_FOUND' });
-    } catch (err) {
-      if (err instanceof DomainError) {
-        sendJson(res, err.status, { error: err.code, message: err.message });
+      // All operational, financial, POS, CRM, timetable & PII routes require admin auth
+      if (pathname.startsWith('/api/')) {
+        requireAdmin(req);
+      }
+
+      if (method === 'GET' && pathname === '/api/analytics') {
+        sendJson(req, res, 200, { ok: true, ...db.getAnalytics(branchIdQuery) }, explicitAllowed);
         return;
       }
-      sendJson(res, 500, { error: 'INTERNAL_ERROR' });
+
+      if (method === 'GET' && pathname === '/api/branches') {
+        sendJson(req, res, 200, { ok: true, branches: db.listBranches() }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/branches') {
+        const parsed = BranchInputSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const branch = db.createBranch(parsed.data);
+        sendJson(req, res, 201, { ok: true, branch }, explicitAllowed);
+        return;
+      }
+
+      const branchPatchMatch = /^\/api\/branches\/([A-Za-z0-9_-]+)$/.exec(pathname);
+      if (method === 'PATCH' && branchPatchMatch) {
+        const parsed = BranchPatchSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const branch = db.updateBranch(branchPatchMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, branch }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/students') {
+        sendJson(req, res, 200, { ok: true, students: db.listStudents(branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/students') {
+        const parsed = StudentInputSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const student = db.createStudent(parsed.data);
+        sendJson(req, res, 201, { ok: true, student }, explicitAllowed);
+        return;
+      }
+
+      const studentPatchMatch = /^\/api\/students\/([A-Za-z0-9_-]+)$/.exec(pathname);
+      if (method === 'PATCH' && studentPatchMatch) {
+        const parsed = StudentPatchSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const student = db.updateStudent(studentPatchMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, student }, explicitAllowed);
+        return;
+      }
+
+      const ledgerMatch = /^\/api\/students\/([A-Za-z0-9_-]+)\/ledger$/.exec(pathname);
+      if (method === 'GET' && ledgerMatch) {
+        sendJson(req, res, 200, { ok: true, ...db.getStudentLedger(ledgerMatch[1]) }, explicitAllowed);
+        return;
+      }
+
+      const adjustMatch = /^\/api\/students\/([A-Za-z0-9_-]+)\/adjust$/.exec(pathname);
+      if (method === 'POST' && adjustMatch) {
+        const parsed = CreditAdjustSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.adjustStudentCredits({
+          studentId: adjustMatch[1],
+          ...parsed.data
+        });
+        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/courses') {
+        sendJson(req, res, 200, { ok: true, courses: db.listCourses(branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/courses') {
+        const parsed = CourseInputSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const course = db.createCourse(parsed.data);
+        sendJson(req, res, 201, { ok: true, course }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/catalog') {
+        sendJson(
+          req,
+          res,
+          200,
+          {
+            ok: true,
+            courses: db.listCourses(branchIdQuery),
+            items: db.listCatalogItems(branchIdQuery)
+          },
+          explicitAllowed
+        );
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/catalog') {
+        const parsed = CatalogItemSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const item = db.createCatalogItem(parsed.data);
+        sendJson(req, res, 201, { ok: true, item }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/enrollments') {
+        const parsed = EnrollmentPosSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.createEnrollmentPos(parsed.data);
+        sendJson(req, res, 201, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/pos/checkout') {
+        const parsed = PosCheckoutSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.checkoutPosCart(parsed.data);
+        sendJson(req, res, 201, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/leads') {
+        sendJson(req, res, 200, { ok: true, leads: db.listLeads(branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/leads') {
+        const parsed = LeadCreateSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const lead = db.createLead(parsed.data);
+        sendJson(req, res, 201, { ok: true, lead }, explicitAllowed);
+        return;
+      }
+
+      const leadPatchMatch = /^\/api\/leads\/([A-Za-z0-9_-]+)$/.exec(pathname);
+      if (method === 'PATCH' && leadPatchMatch) {
+        const parsed = LeadPatchSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const lead = db.updateLead(leadPatchMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, lead }, explicitAllowed);
+        return;
+      }
+
+      const leadConvertMatch = /^\/api\/leads\/([A-Za-z0-9_-]+)\/convert$/.exec(pathname);
+      if (method === 'POST' && leadConvertMatch) {
+        const parsed = LeadConvertSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.convertLeadToStudent(leadConvertMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/schedule') {
+        sendJson(req, res, 200, { ok: true, ...db.getSchedule(branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/schedule') {
+        const parsed = ScheduleCreateSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const slot = db.createTimetableSlot(parsed.data);
+        sendJson(req, res, 201, { ok: true, slot }, explicitAllowed);
+        return;
+      }
+
+      const schedSlotMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)$/.exec(pathname);
+      if (method === 'PATCH' && schedSlotMatch) {
+        const parsed = SchedulePatchSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const slot = db.updateTimetableSlot(schedSlotMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, slot }, explicitAllowed);
+        return;
+      }
+      if (method === 'DELETE' && schedSlotMatch) {
+        db.deleteTimetableSlot(schedSlotMatch[1]);
+        sendJson(req, res, 200, { ok: true }, explicitAllowed);
+        return;
+      }
+
+      const schedEnrollMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)\/enroll$/.exec(pathname);
+      if (method === 'POST' && schedEnrollMatch) {
+        const parsed = ScheduleEnrollSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const enrolled = db.enrollStudentInSlot(schedEnrollMatch[1], parsed.data);
+        sendJson(req, res, 200, { ok: true, ...enrolled }, explicitAllowed);
+        return;
+      }
+
+      const schedAttMatch = /^\/api\/schedule\/([A-Za-z0-9_-]+)\/attendance$/.exec(pathname);
+      if (method === 'POST' && schedAttMatch) {
+        const parsed = ScheduleAttendanceSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.markScheduleAttendance({
+          timetableSlotId: schedAttMatch[1],
+          ...parsed.data
+        });
+        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'POST' && pathname === '/api/checkin') {
+        const parsed = CheckinSchema.safeParse(await readJsonBody(req));
+        if (!parsed.success) throw new DomainError(400, 'INVALID_INPUT', parsed.error.message);
+        const result = db.checkInByPass(parsed.data);
+        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/renewals') {
+        const rawThresh = Number(url.searchParams.get('threshold') || '2');
+        const threshold = Number.isFinite(rawThresh) ? Math.max(0, Math.min(20, Math.floor(rawThresh))) : 2;
+        sendJson(req, res, 200, { ok: true, queue: db.getRenewalQueue(threshold, branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/invoices') {
+        sendJson(req, res, 200, { ok: true, invoices: db.listInvoices(branchIdQuery) }, explicitAllowed);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/invoices/export.csv') {
+        const csv = db.exportInvoicesCsv();
+        res.writeHead(200, {
+          'content-type': 'text/csv; charset=utf-8',
+          'content-disposition': 'attachment; filename="open-center-invoices.csv"',
+          'cache-control': 'no-store',
+          ...buildCorsHeaders(req, explicitAllowed)
+        });
+        res.end(csv);
+        return;
+      }
+
+      const paidMatch = /^\/api\/invoices\/([A-Za-z0-9_-]+)\/pay$/.exec(pathname);
+      if (method === 'POST' && paidMatch) {
+        const invoice = db.markInvoicePaid(paidMatch[1]);
+        sendJson(req, res, 200, { ok: true, invoice }, explicitAllowed);
+        return;
+      }
+
+      const voidRefundMatch = /^\/api\/invoices\/([A-Za-z0-9_-]+)\/(void|refund)$/.exec(pathname);
+      if (method === 'POST' && voidRefundMatch) {
+        const targetStatus = voidRefundMatch[2] === 'refund' ? 'Refunded' : 'Voided';
+        const result = db.voidOrRefundInvoice(voidRefundMatch[1], targetStatus);
+        sendJson(req, res, 200, { ok: true, ...result }, explicitAllowed);
+        return;
+      }
+
+      sendJson(req, res, 404, { error: 'NOT_FOUND' }, explicitAllowed);
+    } catch (err) {
+      if (err instanceof DomainError) {
+        sendJson(req, res, err.status, { error: err.code, message: err.message }, explicitAllowed);
+        return;
+      }
+      sendJson(req, res, 500, { error: 'INTERNAL_ERROR' }, explicitAllowed);
     }
-  });
+  }) as OpenCenterServer;
+
+  server.adminPassword = adminPassword;
+  server.generatedPasswordUsed = generatedPasswordUsed;
+  return server;
 }

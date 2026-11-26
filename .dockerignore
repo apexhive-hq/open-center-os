@@ -1,11 +1,5 @@
 **/node_modules
 **/dist
-storefront
-.git
-.wrangler
-.wrangler-state
-.dev.vars
-*.db
-*.sqlite
-*.db-wal
-*.db-shm
+.git/
+*.log
+*.sqlite*

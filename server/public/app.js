@@ -1,25 +1,8 @@
 'use strict';
 
 (function () {
-  const STORAGE_KEY = 'open_center_os_demo_v21';
+  const STORAGE_KEY = 'open_center_os_demo_v22';
   const LANG_KEY = 'open_center_os_lang';
-  const BASE_CHAIN_ID_HEX = '0x2105';
-  const BASE_USDC_ADDRESS = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-  const TREASURY_ADDRESS = '0x32eceaC45DBED9E555dAb80346aBd4Ab9C676206';
-  const DEFAULT_SPKI_B64 = 'MCowBQYDK2VwAyEAIZ0+vY6AoGS1MjRWirRbdfdgEnjRUWMdsKtRv4hek0g=';
-
-  const TIER_ATOMIC = {
-    sponsor15: 15_000_000n,
-    sponsor49: 49_000_000n,
-    team: 499_000_000n,
-    chain: 999_000_000n,
-  };
-  const TIER_LABEL = {
-    sponsor15: '15 USDC',
-    sponsor49: '49 USDC',
-    team: '499 USDC',
-    chain: '999 USDC',
-  };
 
   const I18N = {
     en: {
@@ -29,7 +12,7 @@
       resetDemo: 'Reset Demo Data',
       githubLink: 'GitHub MIT Repo',
       menuBtn: 'Menu',
-      heroPill: 'MIT $0 Forever (1 Branch)',
+      heroPill: '100% Free Multi-Branch MIT',
       heroTitle: 'Open-Source Education Center & SME Studio Operations OS',
       heroSubtitle: 'Touch POS cart, bilingual printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.',
       navDashboard: 'Dashboard & BI',
@@ -37,7 +20,7 @@
       navPos: 'POS Cart & Invoices',
       navCrm: 'Students, CRM & Credits',
       navQr: 'QR Pass & Parent Portal',
-      navLicensing: 'Branches & MIT / USDC',
+      navLicensing: 'Branches & MIT Self-Host',
       mStudents: 'Active Packages',
       mCredits: 'Remaining Credits',
       mRenewals: 'Auto-Renewal Queue (<=2)',
@@ -119,34 +102,16 @@
       parentPortalLbl: 'Student:',
       parentPortalRemaining: 'Remaining Credits',
       parentPortalHistory: 'Recent Attendance Stamps:',
-      branchHeading: 'Multi-Branch Manager (1 Branch = $0 MIT)',
+      branchHeading: 'Multi-Branch Manager (100% Free Unlimited MIT)',
       branchCodePh: 'Code (e.g. MKK)',
       branchNamePh: 'Branch Name (e.g. Mong Kok Studio)',
       addBranchBtn: '+ Add Branch',
       renameBtn: 'Rename',
       saveBtn: 'Save',
       activeStatus: 'Active',
-      licActivateHeading: 'Activate Signed Ed25519 License',
-      licActivateBtn: 'Activate License',
-      licensingHeading: 'Open-Core Licensing & Self-Hosting',
-      licensingSubtitle: 'Single-branch centers and studios run 100% unrestricted under MIT ($0 forever) using Node 24 built-in SQLite. Upgrade only if you operate 2+ branches or wish to sponsor development.',
-      tierFreeTitle: 'Single-Branch MIT',
-      tierS15Title: 'Community Supporter',
-      tierS49Title: 'Studio Patron',
-      tierTeamTitle: 'Growth Multi-Branch Team',
-      tierChainTitle: 'Enterprise Unlimited Chain',
-      pickS15: 'Select Supporter (15 USDC)',
-      pickS49: 'Select Patron (49 USDC)',
-      pickTeam: 'Select Team (499 USDC)',
-      pickChain: 'Select Chain (999 USDC)',
-      selectedTierLbl: 'Selected Tier:',
-      manualTxLbl: 'Already sent Base USDC? Paste transaction hash to verify & claim:',
-      manualVerifyBtn: 'Sign & Verify Claim',
-      entitlementIssued: 'Entitlement Issued',
-      activationCmdLbl: 'CLI Activation Command:',
-      signedTokenLbl: 'Signed License Token:',
-      downloadBundle: 'Download Entitlement Bundle',
-      footerCopy: 'open-center-os — MIT Single-Branch Free ($0) Operations System',
+      licensingHeading: 'Self-Hosting & Security Architecture (MIT)',
+      licensingSubtitle: 'All single-branch and multi-branch operations run 100% unrestricted under MIT using Node 24 built-in node:sqlite, HttpOnly cookie/Bearer admin auth, and locked CORS.',
+      footerCopy: 'open-center-os — 100% Free Multi-Branch MIT Operations OS',
       supportLbl: 'Support:',
       receiptTitle: 'Bilingual Official Receipt / 正式收據',
       printBtn: 'Print',
@@ -161,9 +126,7 @@
       saveChanges: 'Save Changes',
       days: ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
       methods: { fps: 'FPS', card: 'Card', cash: 'Cash', usdc: 'USDC' },
-      mitBannerOk: '1 active branch: 100% free forever under MIT License.',
-      branchBlockedTeam: 'MIT Single-Branch ($0) allows 1 branch. Activate Growth Team (499 USDC) for 2-3 branches or Chain (999 USDC) for 4+.',
-      branchBlockedChain: 'Team license allows up to 3 branches. Activate Enterprise Chain (999 USDC) for 4+ branches.',
+      mitBannerOk: 'Unlimited branches active — 100% free forever under MIT License.',
     },
     'zh-HK': {
       brandSub: '教室與工作室系統',
@@ -172,7 +135,7 @@
       resetDemo: '重設示範資料',
       githubLink: 'GitHub MIT 原始碼',
       menuBtn: '選單',
-      heroPill: '單分校 MIT 永久 $0',
+      heroPill: '無限分店 MIT 永久免費',
       heroTitle: '開源教育中心與預約工作室營運系統',
       heroSubtitle: '觸控購物車 POS、雙語列印收據、每週課表導師點名台、試堂 CRM 轉正、真實二維碼通行證及家長查堂頁。',
       navDashboard: 'BI 營運總覽',
@@ -180,7 +143,7 @@
       navPos: 'POS 收銀車與發票',
       navCrm: '學生・試堂 CRM・補堂',
       navQr: 'QR 通行證與家長查堂頁',
-      navLicensing: '分店管理與開源授權',
+      navLicensing: '多分店管理與自架',
       mStudents: '有效套票數目',
       mCredits: '總剩餘堂數',
       mRenewals: '自動續費隊列 (<=2堂)',
@@ -262,34 +225,16 @@
       parentPortalLbl: '學生：',
       parentPortalRemaining: '剩餘堂數',
       parentPortalHistory: '近期點名印章紀錄：',
-      branchHeading: '多分店管理（1 間分店永久 $0 MIT）',
+      branchHeading: '多分店管理（MIT 永久免費無限制）',
       branchCodePh: '代碼 (如 MKK)',
       branchNamePh: '分店名稱 (如旺角分校)',
       addBranchBtn: '+ 新增分店',
       renameBtn: '改名',
       saveBtn: '儲存',
       activeStatus: '營運中',
-      licActivateHeading: '啟用 Ed25519 簽名授權碼',
-      licActivateBtn: '啟用授權',
-      licensingHeading: 'Open-Core 授權與自建部署',
-      licensingSubtitle: '單分校透過 Node 24 內建 SQLite 永久免費使用。僅於管理 2 間以上分店或自願贊助時選購鏈上授權。',
-      tierFreeTitle: '單分校 MIT 開源版',
-      tierS15Title: '社群贊助支持者',
-      tierS49Title: '教室贊助人',
-      tierTeamTitle: '成長型多分店版',
-      tierChainTitle: '連鎖無限分店版',
-      pickS15: '選擇支持者 (15 USDC)',
-      pickS49: '選擇贊助人 (49 USDC)',
-      pickTeam: '選擇 Team (499 USDC)',
-      pickChain: '選擇 Chain (999 USDC)',
-      selectedTierLbl: '已選方案：',
-      manualTxLbl: '已匯出 Base USDC？貼上交易雜湊驗證領取：',
-      manualVerifyBtn: '簽名並驗證領取',
-      entitlementIssued: '已簽發離線授權',
-      activationCmdLbl: 'CLI 啟用指令：',
-      signedTokenLbl: '簽名授權令牌：',
-      downloadBundle: '下載授權憑證包',
-      footerCopy: 'open-center-os — 單分校 MIT 永久 $0 營運系統',
+      licensingHeading: '自建部署與安全架構 (MIT)',
+      licensingSubtitle: '全套單分店與多分店營運功能透過 Node 24 內建 node:sqlite、HttpOnly Cookie/Bearer 驗證與鎖定 CORS 永久免費使用。',
+      footerCopy: 'open-center-os — 100% 免費多分店 MIT 營運系統',
       supportLbl: '技術支援：',
       receiptTitle: '正式雙語收據 / Bilingual Official Receipt',
       printBtn: '列印',
@@ -304,9 +249,7 @@
       saveChanges: '儲存變更',
       days: ['', '週一', '週二', '週三', '週四', '週五', '週六', '週日'],
       methods: { fps: '轉數快 FPS', card: '刷卡', cash: '現金', usdc: 'USDC' },
-      mitBannerOk: '目前 1 間分店：MIT 授權永久免費無限制使用。',
-      branchBlockedTeam: '單分校 MIT ($0) 只限 1 間分店。請啟用 Team (499 USDC，限 3 間) 或 Chain (999 USDC，無限分店)。',
-      branchBlockedChain: 'Team 授權上限為 3 間分店。開設第 4 間或以上請啟用 Chain (999 USDC) 授權。',
+      mitBannerOk: 'MIT 授權永久免費支援無限分店。',
     },
     'zh-CN': {
       brandSub: '校区与工作室系统',
@@ -315,7 +258,7 @@
       resetDemo: '重置演示数据',
       githubLink: 'GitHub MIT 仓库',
       menuBtn: '菜单',
-      heroPill: '单校区 MIT 永久 $0',
+      heroPill: '无限校区 MIT 永久免费',
       heroTitle: '开源教育中心与预约工作室运营系统',
       heroSubtitle: '触控购物车 POS、双语打印收据、每周课表导师点名台、试听 CRM 转正、真实二维码通行证与家长查课页。',
       navDashboard: 'BI 运营总览',
@@ -323,7 +266,7 @@
       navPos: 'POS 收银车与发票',
       navCrm: '学员・试听 CRM・补课',
       navQr: 'QR 通行证与家长查课页',
-      navLicensing: '分店管理与开源授权',
+      navLicensing: '多校区管理与自托管',
       mStudents: '有效课包数',
       mCredits: '总剩余课时',
       mRenewals: '自动续费队列 (<=2节)',
@@ -405,34 +348,16 @@
       parentPortalLbl: '学员：',
       parentPortalRemaining: '剩余课时',
       parentPortalHistory: '近期点名印章记录：',
-      branchHeading: '多校区管理（单校区永久 $0 MIT）',
+      branchHeading: '多校区管理（MIT 永久免费无限制）',
       branchCodePh: '代码 (如 MKK)',
       branchNamePh: '校区名称 (如旺角校区)',
       addBranchBtn: '+ 新增校区',
       renameBtn: '改名',
       saveBtn: '保存',
       activeStatus: '运营中',
-      licActivateHeading: '激活 Ed25519 签名授权码',
-      licActivateBtn: '激活授权',
-      licensingHeading: 'Open-Core 授权与自托管',
-      licensingSubtitle: '单校区可通过 Node 24 内置 SQLite 永久免费使用。仅当运营 2 个及以上校区或自愿赞助时选购链上授权。',
-      tierFreeTitle: '单校区 MIT 开源版',
-      tierS15Title: '社区支持者捐赠',
-      tierS49Title: '工作室赞助人',
-      tierTeamTitle: '成长型多校区版',
-      tierChainTitle: '连锁无限校区版',
-      pickS15: '选择支持者 (15 USDC)',
-      pickS49: '选择赞助人 (49 USDC)',
-      pickTeam: '选择 Team (499 USDC)',
-      pickChain: '选择 Chain (999 USDC)',
-      selectedTierLbl: '已选方案：',
-      manualTxLbl: '已发送 Base USDC？粘贴交易哈希验证领取：',
-      manualVerifyBtn: '签名并验证领取',
-      entitlementIssued: '已签发离线授权',
-      activationCmdLbl: 'CLI 激活命令：',
-      signedTokenLbl: '签名授权令牌：',
-      downloadBundle: '下载授权凭证包',
-      footerCopy: 'open-center-os — 单校区 MIT 永久 $0 运营系统',
+      licensingHeading: '自托管与安全架构 (MIT)',
+      licensingSubtitle: '单校区与多校区功能通过 Node 24 内置 node:sqlite、HttpOnly Cookie/Bearer 登录认证与锁定 CORS 永久免费无限制使用。',
+      footerCopy: 'open-center-os — 100% 免费多校区 MIT 运营系统',
       supportLbl: '技术支持：',
       receiptTitle: '正式双语收据 / Bilingual Official Receipt',
       printBtn: '打印',
@@ -447,9 +372,7 @@
       saveChanges: '保存更改',
       days: ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'],
       methods: { fps: 'FPS', card: '刷卡', cash: '现金', usdc: 'USDC' },
-      mitBannerOk: '当前 1 个校区：MIT 授权永久免费无限制使用。',
-      branchBlockedTeam: '单校区 MIT ($0) 限 1 个校区。请激活 Team (499 USDC，限 3 校区) 或 Chain (999 USDC，无限校区)。',
-      branchBlockedChain: 'Team 授权上限为 3 个校区。新增第 4 个及以上请激活 Chain (999 USDC) 授权。',
+      mitBannerOk: 'MIT 授权永久免费支持无限校区。',
     },
   };
 
@@ -571,9 +494,9 @@
   let activeCreditPass = null;
   let editingStudentPass = null;
   let serverBackendActive = false;
+  let serverAuthenticated = false;
   let serverAnalytics = null;
   let serverTeachers = [];
-  let publicSpkiB64 = DEFAULT_SPKI_B64;
 
   function saveState() {
     if (serverBackendActive) return;
@@ -619,55 +542,8 @@
     if (bd) bd.hidden = true;
   }
 
-  function getMaxBranchesAllowed() {
-    if (!state.license) return 1;
-    if (state.license.tier === 'chain') return state.license.maxBranches === undefined ? null : state.license.maxBranches;
-    if (state.license.tier === 'team') return state.license.maxBranches || 3;
-    return 1;
-  }
-
-  function base64UrlToUint8(b64u) {
-    const pad = b64u.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((b64u.length + 3) % 4);
-    const bin = atob(pad);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) arr[i] = bin.charCodeAt(i);
-    return arr;
-  }
-
-  function spkiB64ToBytes(b64) {
-    const bin = atob(b64.trim());
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i += 1) arr[i] = bin.charCodeAt(i);
-    return arr;
-  }
-
-  async function verifyLicenseTokenClient(token) {
-    const trimmed = String(token || '').trim();
-    const prefix = 'OPENCEN-PRO-v1.';
-    if (!trimmed.startsWith(prefix)) throw new Error('Invalid token prefix (expected OPENCEN-PRO-v1.)');
-    const parts = trimmed.slice(prefix.length).split('.');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) throw new Error('Malformed token structure.');
-
-    const key = await crypto.subtle.importKey(
-      'spki',
-      spkiB64ToBytes(publicSpkiB64),
-      { name: 'Ed25519' },
-      false,
-      ['verify']
-    );
-    const signingInput = new TextEncoder().encode(`${prefix}${parts[0]}`);
-    const sigBytes = base64UrlToUint8(parts[1]);
-    const ok = await crypto.subtle.verify('Ed25519', key, sigBytes, signingInput);
-    if (!ok) throw new Error('Invalid Ed25519 signature.');
-
-    const payload = JSON.parse(new TextDecoder().decode(base64UrlToUint8(parts[0])));
-    if (!payload || payload.product !== 'open-center-os') throw new Error('Invalid product payload.');
-    const maxBranches = payload.tier === 'chain' ? null : payload.tier === 'team' ? (payload.maxBranches || 3) : 1;
-    return { tier: payload.tier, maxBranches, token: trimmed };
-  }
-
   async function apiJson(url, opts = {}) {
-    const res = await fetch(url, opts);
+    const res = await fetch(url, { credentials: 'same-origin', ...opts });
     let data = null;
     try {
       data = await res.json();
@@ -681,8 +557,8 @@
   }
 
   async function syncFromServer() {
-    if (!serverBackendActive) return;
-    const [branchesRes, studentsRes, catalogRes, schedRes, leadsRes, invRes, analyticsRes, healthRes] = await Promise.all([
+    if (!serverBackendActive || !serverAuthenticated) return;
+    const [branchesRes, studentsRes, catalogRes, schedRes, leadsRes, invRes, analyticsRes] = await Promise.all([
       apiJson('/api/branches'),
       apiJson('/api/students'),
       apiJson('/api/catalog'),
@@ -690,7 +566,6 @@
       apiJson('/api/leads'),
       apiJson('/api/invoices'),
       apiJson('/api/analytics'),
-      apiJson('/api/health'),
     ]);
 
     const branchList = (branchesRes.branches || []).map((b) => ({
@@ -786,7 +661,6 @@
       ...state,
       branchId: activeBranchId,
       branches: branchList,
-      license: healthRes.activeLicense || state.license,
       catalog,
       packages,
       invoices,
@@ -908,26 +782,8 @@
     $('branch-code-input').placeholder = t.branchCodePh;
     $('branch-name-input').placeholder = t.branchNamePh;
     $('add-branch-btn').textContent = t.addBranchBtn;
-    $('license-activate-heading').textContent = t.licActivateHeading;
-    $('license-activate-btn').textContent = t.licActivateBtn;
     $('licensing-heading').textContent = t.licensingHeading;
     $('licensing-subtitle').textContent = t.licensingSubtitle;
-    $('tier-title-free').textContent = t.tierFreeTitle;
-    $('tier-title-s15').textContent = t.tierS15Title;
-    $('tier-title-s49').textContent = t.tierS49Title;
-    $('tier-title-team').textContent = t.tierTeamTitle;
-    $('tier-title-chain').textContent = t.tierChainTitle;
-    $('pick-s15-btn').textContent = t.pickS15;
-    $('pick-s49-btn').textContent = t.pickS49;
-    $('pick-team-btn').textContent = t.pickTeam;
-    $('pick-chain-btn').textContent = t.pickChain;
-    $('selected-tier-lbl').textContent = t.selectedTierLbl;
-    $('manual-tx-lbl').textContent = t.manualTxLbl;
-    $('manual-verify-btn').textContent = t.manualVerifyBtn;
-    $('entitlement-issued-lbl').textContent = t.entitlementIssued;
-    $('activation-cmd-lbl').textContent = t.activationCmdLbl;
-    $('signed-token-lbl').textContent = t.signedTokenLbl;
-    $('download-bundle-link').textContent = t.downloadBundle;
     $('footer-copy').textContent = t.footerCopy;
     $('footer-support-lbl').textContent = t.supportLbl;
 
@@ -1569,28 +1425,16 @@
       list.replaceChildren(...rows);
     }
 
-    const maxAllowed = getMaxBranchesAllowed();
     const count = state.branches.length;
     const qp = $('branch-quota-pill');
     if (qp) {
-      if (maxAllowed === null) qp.textContent = `${count} / Unlimited (Chain)`;
-      else if (state.license?.tier === 'team') qp.textContent = `${count} / ${maxAllowed} Team`;
-      else qp.textContent = `${count} / 1 MIT`;
+      qp.textContent = `${count} / Unlimited MIT`;
     }
 
     const banner = $('branch-license-banner');
     if (banner && !banner.dataset.errorHold) {
-      if (count <= 1 && !state.license) {
-        banner.className = 'status-box ok';
-        banner.textContent = t.mitBannerOk;
-      } else if (state.license?.tier === 'chain') {
-        banner.className = 'status-box ok';
-        banner.textContent = `${count} active branches — Unlimited Chain License active.`;
-      } else if (state.license?.tier === 'team') {
-        banner.className = 'status-box ok';
-        banner.textContent = `${count} / 3 branches — Growth Team License active.`;
-      }
-      updateWalletPayLabel();
+      banner.className = 'status-box ok';
+      banner.textContent = t.mitBannerOk;
     }
   }
 
@@ -1628,112 +1472,29 @@
     return true;
   }
 
-  function updateWalletPayLabel() {
-    const sel = $('tier-select');
-    const btn = $('wallet-pay-btn');
-    if (!sel || !btn) return;
-    btn.textContent = `Pay ${TIER_LABEL[sel.value] || '499 USDC'} with Base Wallet`;
-  }
-
-  function encodeErc20Transfer(recipient, atomicAmount) {
-    const cleanAddr = recipient.toLowerCase().replace(/^0x/, '').padStart(64, '0');
-    const amountHex = BigInt(atomicAmount).toString(16).padStart(64, '0');
-    return `0xa9059cbb${cleanAddr}${amountHex}`;
-  }
-
-  async function activateLicenseToken(token) {
-    const statusEl = $('license-activate-status');
-    try {
-      if (serverBackendActive) {
-        const out = await apiJson('/api/license/activate', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        await syncFromServer();
-        showBox(statusEl, `Activated ${out.tier} license (maxBranches: ${out.maxBranches ?? 'Unlimited'}).`, 'ok');
-      } else {
-        const verified = await verifyLicenseTokenClient(token);
-        state.license = verified;
-        saveState();
-        showBox(statusEl, `Verified & activated ${verified.tier} license.`, 'ok');
-      }
-      delete $('branch-license-banner').dataset.errorHold;
-      renderBranchesAndLicensing();
-    } catch (err) {
-      showBox(statusEl, err?.message || String(err), 'error');
-    }
-  }
-
-  async function verifyAndClaimTx(txHash, tier) {
-    const statusEl = $('checkout-status');
-    const resultEl = $('checkout-result');
-    resultEl.hidden = true;
-    $('license-token-text').textContent = '';
-    showBox(statusEl, 'Requesting EIP-191 ownership challenge...', '');
-
-    const chRes = await fetch('/api/challenge', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ txHash, tier }),
-    });
-    const ch = await chRes.json();
-    if (!chRes.ok) {
-      showBox(statusEl, ch.error || 'Challenge failed', 'error');
-      return;
-    }
-
-    if (!window.ethereum) {
-      showBox(statusEl, 'No EIP-1193 wallet detected to sign EIP-191 ownership challenge.', 'error');
-      return;
-    }
-
-    const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-    const sig = await window.ethereum.request({
-      method: 'personal_sign',
-      params: [ch.message, accounts[0]],
-    });
-
-    const vRes = await fetch('/api/verify', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ txHash, nonce: ch.nonce, signature: sig, tier }),
-    });
-    const out = await vRes.json();
-    if (!vRes.ok) {
-      showBox(statusEl, out.error || 'Verification failed', 'error');
-      return;
-    }
-
-    showBox(statusEl, 'Base USDC verified! Entitlement issued.', 'ok');
-    $('activation-cmd').textContent = `node dist/src/cli.js activate --token "${out.licenseToken}"`;
-    $('license-token-text').textContent = out.licenseToken;
-    $('download-bundle-link').href = out.downloadUrl;
-    resultEl.hidden = false;
-
-    // Auto-populate and activate the freshly minted license token so branch creation updates seamlessly
-    if ($('license-token-input')) $('license-token-input').value = out.licenseToken;
-    await activateLicenseToken(out.licenseToken);
+  function updateAuthUi() {
+    const loginBar = $('auth-login-bar');
+    const logoutBtn = $('auth-logout-btn');
+    if (loginBar) loginBar.hidden = !serverBackendActive || serverAuthenticated;
+    if (logoutBtn) logoutBtn.hidden = !serverBackendActive || !serverAuthenticated;
   }
 
   async function initBackend() {
     try {
-      const cfgRes = await fetch('/api/config');
-      if (cfgRes.ok) {
-        const cfg = await cfgRes.json();
-        if (cfg && cfg.licensePublicKeySpkiB64) publicSpkiB64 = cfg.licensePublicKeySpkiB64;
-      }
-    } catch {
-      // ignore config failure on static preview
-    }
-
-    try {
-      const res = await fetch('/api/health');
+      const res = await fetch('/api/health', { credentials: 'same-origin' });
       if (!res.ok) return;
       const data = await res.json();
       if (data && data.mode === 'sqlite-server') {
         serverBackendActive = true;
-        await syncFromServer();
+        const meRes = await fetch('/api/auth/me', { credentials: 'same-origin' });
+        if (meRes.ok) {
+          const me = await meRes.json();
+          serverAuthenticated = Boolean(me && me.authenticated);
+        }
+        updateAuthUi();
+        if (serverAuthenticated) {
+          await syncFromServer();
+        }
         applyLang(lang);
       }
     } catch {
@@ -2157,21 +1918,6 @@
       return;
     }
 
-    const maxAllowed = getMaxBranchesAllowed();
-    if (maxAllowed !== null && state.branches.length >= maxAllowed) {
-      banner.dataset.errorHold = '1';
-      if (state.branches.length >= 3) {
-        $('tier-select').value = 'chain';
-        updateWalletPayLabel();
-        showBox(banner, t.branchBlockedChain, 'error');
-      } else {
-        $('tier-select').value = 'team';
-        updateWalletPayLabel();
-        showBox(banner, t.branchBlockedTeam, 'error');
-      }
-      return;
-    }
-
     delete banner.dataset.errorHold;
     state.branches.push({ id: code, code, name });
     $('branch-code-input').value = '';
@@ -2180,62 +1926,36 @@
     renderAll();
   });
 
-  $('license-activate-btn')?.addEventListener('click', () => {
-    activateLicenseToken($('license-token-input').value);
-  });
-
   $('receipt-close-btn')?.addEventListener('click', () => {
     $('receipt-modal').hidden = true;
   });
   $('receipt-print-btn')?.addEventListener('click', () => window.print());
 
-  document.querySelectorAll('.tier-pick-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      $('tier-select').value = btn.getAttribute('data-tier');
-      updateWalletPayLabel();
-    });
-  });
-  $('tier-select')?.addEventListener('change', updateWalletPayLabel);
-
-  if (typeof window.ethereum !== 'undefined') {
-    const btn = $('wallet-pay-btn');
-    if (btn) {
-      btn.hidden = false;
-      updateWalletPayLabel();
-    }
-  }
-
-  $('wallet-pay-btn')?.addEventListener('click', async () => {
+  $('auth-login-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const statusBox = $('auth-login-status');
+    const password = $('auth-password-input').value;
     try {
-      const tier = $('tier-select').value;
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-      if (String(chainId).toLowerCase() !== BASE_CHAIN_ID_HEX) {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: BASE_CHAIN_ID_HEX }],
-        });
-      }
-      const data = encodeErc20Transfer(TREASURY_ADDRESS, TIER_ATOMIC[tier]);
-      const txHash = await window.ethereum.request({
-        method: 'eth_sendTransaction',
-        params: [{ from: accounts[0], to: BASE_USDC_ADDRESS, data, value: '0x0' }],
+      await apiJson('/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password }),
       });
-      $('manual-tx-input').value = txHash;
-      await verifyAndClaimTx(txHash, tier);
+      serverAuthenticated = true;
+      $('auth-password-input').value = '';
+      if (statusBox) statusBox.hidden = true;
+      updateAuthUi();
+      await syncFromServer();
+      renderAll();
     } catch (err) {
-      showBox($('checkout-status'), err?.message || String(err), 'error');
+      showBox(statusBox, err?.message || 'Sign-in failed.', 'error');
     }
   });
 
-  $('manual-verify-btn')?.addEventListener('click', async () => {
-    try {
-      const txHash = $('manual-tx-input').value.trim();
-      const tier = $('tier-select').value;
-      await verifyAndClaimTx(txHash, tier);
-    } catch (err) {
-      showBox($('checkout-status'), err?.message || String(err), 'error');
-    }
+  $('auth-logout-btn')?.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    serverAuthenticated = false;
+    updateAuthUi();
   });
 
   applyLang(lang);

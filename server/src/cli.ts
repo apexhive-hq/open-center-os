@@ -2,7 +2,6 @@
 import { join } from 'node:path';
 import { createOpenCenterServer } from './app.js';
 import { OpenCenterDb } from './db.js';
-import { loadActiveLicense, saveActivatedLicense } from './license.js';
 import { seedDemoData } from './seed.js';
 
 function readFlag(args: string[], name: string): string | undefined {
@@ -15,20 +14,12 @@ function main() {
   const args = process.argv.slice(2);
   const sub = args[0];
 
-  if (sub === 'activate' || (sub === 'license' && args[1] === 'activate')) {
-    const token = readFlag(args, '--token') || (sub === 'license' ? args[2] : args[1]);
-    if (!token || token.startsWith('--')) {
-      console.error('Usage: open-center-os activate --token <OPENCEN-PRO-v1...>');
-      process.exit(2);
-    }
-    const { filePath, verification } = saveActivatedLicense(token);
-    console.log(JSON.stringify({ ok: true, tier: verification.payload?.tier, filePath }, null, 2));
-    return;
-  }
+  if (sub === 'help' || sub === '--help' || sub === '-h') {
+    console.log(`open-center-os — Free MIT Multi-Branch Operations Server
 
-  if (sub === 'license-status') {
-    const status = loadActiveLicense();
-    console.log(JSON.stringify(status ?? { valid: false, reason: 'Single-branch MIT mode ($0 unrestricted).' }, null, 2));
+Usage:
+  open-center-os serve [--host 127.0.0.1] [--port 3800] [--data-dir ./data] [--seed] [--admin-password <pw>]
+`);
     return;
   }
 
@@ -36,16 +27,22 @@ function main() {
   const port = Number(readFlag(args, '--port') || (sub === 'serve' ? '3800' : '3000'));
   const dataDir = readFlag(args, '--data-dir') || './data';
   const shouldSeed = args.includes('--seed');
+  const adminPassword = readFlag(args, '--admin-password') || process.env.OPENCENTER_ADMIN_PASSWORD;
   const dbPath = join(dataDir, 'open-center.sqlite');
 
   const db = new OpenCenterDb(dbPath);
   if (shouldSeed) {
     seedDemoData(db);
   }
-  const server = createOpenCenterServer({ db });
+  const server = createOpenCenterServer({ db, adminPassword });
 
   server.listen(port, host, () => {
-    console.log(`open-center-os MIT server listening on http://${host}:${port} (db: ${dbPath}${shouldSeed ? ', seeded' : ''})`);
+    console.log(
+      `open-center-os MIT server listening on http://${host}:${port} (db: ${dbPath}${shouldSeed ? ', seeded' : ''})`
+    );
+    if (server.generatedPasswordUsed) {
+      console.log(`Generated one-time Admin password (set OPENCENTER_ADMIN_PASSWORD to override): ${server.adminPassword}`);
+    }
   });
 
   const shutdown = () => {

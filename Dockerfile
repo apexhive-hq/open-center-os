@@ -7,7 +7,7 @@ RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts
 
 COPY server/tsconfig.json ./
 COPY server/src ./src
-COPY storefront/public ./public
+COPY server/public ./public
 RUN pnpm run build && chown -R node:node /app
 
 USER node

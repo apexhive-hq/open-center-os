@@ -43,12 +43,13 @@
         </button>
         <button class="nav-item" type="button" data-view="licensing">
           <span class="nav-dot"></span>
-          <span id="nav-lbl-licensing">Branches &amp; MIT / USDC</span>
+          <span id="nav-lbl-licensing">Branches &amp; MIT Self-Host</span>
         </button>
       </nav>
 
       <div class="sidebar-footer">
         <div id="mode-badge" class="pill pill-ok">Browser Sandbox Demo — Self-Host Node SQLite for Sync</div>
+        <button id="auth-logout-btn" class="btn btn-sm" type="button" hidden>Sign Out</button>
         <button id="reset-demo-btn" class="btn btn-sm" type="button">Reset Demo Data</button>
         <a id="github-repo-link" class="sidebar-link" href="https://github.com/apexhive-hq/open-center-os" target="_blank" rel="noopener noreferrer">GitHub MIT Repo</a>
       </div>
@@ -58,7 +59,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <button id="sidebar-toggle-btn" class="btn btn-sm mobile-only" type="button" aria-label="Toggle menu">Menu</button>
-          <span id="hero-pill" class="badge-pill">MIT $0 Forever (1 Branch)</span>
+          <span id="hero-pill" class="badge-pill">100% Free Multi-Branch MIT</span>
           <div class="branch-switcher">
             <label id="branch-select-lbl" for="branch-select" class="sr-only">Active Branch</label>
             <select id="branch-select" class="text-input compact-select"></select>
@@ -79,6 +80,16 @@
           <p id="hero-subtitle" class="subtitle">
             Touch POS cart, bilingual printable receipts, weekly timetable teacher roster check-in, CRM trial pipeline, real SVG QR passes, and read-only parent portal.
           </p>
+        </section>
+
+        <section id="auth-login-bar" class="card" hidden>
+          <h2 style="margin-top:0;">Admin Sign-In Required (SQLite Server Mode)</h2>
+          <p class="subtitle">All student, POS, lead, branch, and invoice API routes are protected by HMAC-SHA256 HttpOnly sessions.</p>
+          <form id="auth-login-form" class="inline-form">
+            <input id="auth-password-input" class="text-input" type="password" placeholder="Admin password (OPENCENTER_ADMIN_PASSWORD)" autocomplete="current-password" required>
+            <button id="auth-login-btn" class="btn btn-primary" type="submit">Sign In</button>
+          </form>
+          <div id="auth-login-status" class="status-box" hidden></div>
         </section>
 
         <!-- VIEW 1: DASHBOARD & BI ANALYTICS -->
@@ -347,13 +358,13 @@
           </div>
         </section>
 
-        <!-- VIEW 6: BRANCHES, SPONSOR & BASE USDC LICENSING -->
+        <!-- VIEW 6: MULTI-BRANCH MANAGER & MIT SELF-HOSTING -->
         <section id="view-licensing" class="view-panel" hidden>
           <div class="card">
             <div class="card-head">
               <div class="toolbar">
-                <h2 id="branch-heading">Multi-Branch Manager (1 Branch = $0 MIT)</h2>
-                <span id="branch-quota-pill" class="pill pill-ok">1 / 1 MIT</span>
+                <h2 id="branch-heading">Multi-Branch Manager (100% Free Unlimited MIT)</h2>
+                <span id="branch-quota-pill" class="pill pill-ok">Unlimited MIT</span>
               </div>
             </div>
             <form id="branch-add-form" class="inline-form" style="margin-bottom:12px;">
@@ -363,135 +374,24 @@
             </form>
             <div id="branch-list" class="branch-list"></div>
             <div id="branch-license-banner" class="status-box ok" style="margin-top:10px;">
-              1 active branch: 100% free forever under MIT License.
-            </div>
-
-            <div class="subcard" style="margin-top:14px;">
-              <h3 id="license-activate-heading">Activate Signed Ed25519 License</h3>
-              <div class="inline-form">
-                <input id="license-token-input" class="text-input" type="text" placeholder="OPENCEN-PRO-v1...." autocomplete="off">
-                <button id="license-activate-btn" class="btn btn-primary" type="button">Activate License</button>
-              </div>
-              <div id="license-activate-status" class="status-box" hidden></div>
+              Unlimited branches active — 100% free forever under MIT License.
             </div>
           </div>
 
           <div class="card">
-            <h2 id="licensing-heading">Open-Core Licensing &amp; Self-Hosting</h2>
+            <h2 id="licensing-heading">Self-Hosting &amp; Security Architecture (MIT)</h2>
             <p id="licensing-subtitle" class="subtitle">
-              Single-branch centers and studios run 100% unrestricted under MIT ($0 forever) using Node 24 built-in SQLite. Upgrade only if you operate 2+ branches or wish to sponsor development.
+              All single-branch and multi-branch operations run 100% unrestricted under MIT using Node 24 built-in node:sqlite, HttpOnly cookie/Bearer admin auth, and locked CORS.
             </p>
-
-            <div class="pricing-grid">
-              <div class="tier-card">
-                <div>
-                  <h3 id="tier-title-free">Single-Branch MIT</h3>
-                  <div class="tier-price">0 USDC</div>
-                  <ul class="tier-list">
-                    <li id="tier-free-l1">1 active branch unrestricted forever</li>
-                    <li id="tier-free-l2">Unlimited students, POS &amp; invoices</li>
-                    <li id="tier-free-l3">Zero native C++ deps (node:sqlite)</li>
-                  </ul>
-                </div>
-                <code class="code-block">cd server &amp;&amp; pnpm run sync:ui &amp;&amp; pnpm run build &amp;&amp; node dist/src/cli.js serve --seed</code>
-              </div>
-
-              <div class="tier-card">
-                <div>
-                  <h3 id="tier-title-s15">Community Supporter</h3>
-                  <div class="tier-price">15 USDC</div>
-                  <ul class="tier-list">
-                    <li id="tier-s15-l1">Voluntary community supporter donation</li>
-                    <li id="tier-s15-l2">Ed25519 supporter token</li>
-                  </ul>
-                </div>
-                <button id="pick-s15-btn" class="btn tier-pick-btn" type="button" data-tier="sponsor15">Select Supporter (15 USDC)</button>
-              </div>
-
-              <div class="tier-card">
-                <div>
-                  <h3 id="tier-title-s49">Studio Patron</h3>
-                  <div class="tier-price">49 USDC</div>
-                  <ul class="tier-list">
-                    <li id="tier-s49-l1">Voluntary patron donation</li>
-                    <li id="tier-s49-l2">Priority bugfix &amp; schema templates</li>
-                  </ul>
-                </div>
-                <button id="pick-s49-btn" class="btn tier-pick-btn" type="button" data-tier="sponsor49">Select Patron (49 USDC)</button>
-              </div>
-
-              <div class="tier-card featured">
-                <div>
-                  <h3 id="tier-title-team">Growth Multi-Branch Team</h3>
-                  <div class="tier-price">499 USDC</div>
-                  <ul class="tier-list">
-                    <li id="tier-team-l1">Up to 3 branches commercial license</li>
-                    <li id="tier-team-l2">Consolidated POS &amp; renewal rollups</li>
-                    <li id="tier-team-l3">Offline Ed25519 CLI verification</li>
-                  </ul>
-                </div>
-                <button id="pick-team-btn" class="btn btn-primary tier-pick-btn" type="button" data-tier="team">Select Team (499 USDC)</button>
-              </div>
-
-              <div class="tier-card featured">
-                <div>
-                  <h3 id="tier-title-chain">Enterprise Unlimited Chain</h3>
-                  <div class="tier-price">999 USDC</div>
-                  <ul class="tier-list">
-                    <li id="tier-chain-l1">Unlimited (4+) branches lifetime</li>
-                    <li id="tier-chain-l2">Enterprise chain-wide authority</li>
-                    <li id="tier-chain-l3">Offline Ed25519 CLI verification</li>
-                  </ul>
-                </div>
-                <button id="pick-chain-btn" class="btn btn-primary tier-pick-btn" type="button" data-tier="chain">Select Chain (999 USDC)</button>
-              </div>
-            </div>
-
-            <div class="checkout-box">
-              <div id="self-custody-warning" class="warning-banner">
-                <strong>Self-Custody Base Mainnet Notice:</strong> Send Base USDC (<code>0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913</code>, Chain ID <code>8453</code> / <code>0x2105</code>) directly from a wallet whose signing key you control to treasury <code>0x32eceaC45DBED9E555dAb80346aBd4Ab9C676206</code>. Do not send from centralized exchange hot wallets (an EIP-191 ownership signature is required). Requires 2 Base confirmations.
-              </div>
-
-              <div class="toolbar">
-                <label id="selected-tier-lbl" class="field-label" for="tier-select" style="margin: 0;">Selected Tier:</label>
-                <select id="tier-select" class="text-input" style="max-width: 300px;">
-                  <option value="sponsor15">Community Supporter — 15 USDC</option>
-                  <option value="sponsor49">Patron Donation — 49 USDC</option>
-                  <option value="team" selected>Growth Team (Up to 3 Branches) — 499 USDC</option>
-                  <option value="chain">Enterprise Chain (Unlimited) — 999 USDC</option>
-                </select>
-                <button id="wallet-pay-btn" class="btn btn-primary" type="button" hidden>
-                  Pay 499 USDC with Base Wallet
-                </button>
-              </div>
-
-              <div style="margin-top: 14px;">
-                <label id="manual-tx-lbl" class="field-label" for="manual-tx-input">Already sent Base USDC? Paste transaction hash to verify &amp; claim:</label>
-                <div class="toolbar">
-                  <input id="manual-tx-input" class="text-input" style="flex: 1 1 260px;" type="text" placeholder="0x..." autocomplete="off">
-                  <button id="manual-verify-btn" class="btn" type="button">Sign &amp; Verify Claim</button>
-                </div>
-              </div>
-
-              <div id="checkout-status" class="status-box" hidden></div>
-
-              <div id="checkout-result" class="status-box ok" hidden>
-                <div><strong id="entitlement-issued-lbl">Entitlement Issued</strong></div>
-                <div id="activation-cmd-lbl" style="margin-top: 6px;">CLI Activation Command:</div>
-                <pre id="activation-cmd" class="code-block"></pre>
-                <div id="signed-token-lbl">Signed License Token:</div>
-                <pre id="license-token-text" class="code-block"></pre>
-                <a id="download-bundle-link" class="btn btn-primary" href="#" download="open-center-os-entitlement.json">Download Entitlement Bundle</a>
-              </div>
-            </div>
+            <code class="code-block">cd server &amp;&amp; pnpm install --ignore-scripts &amp;&amp; pnpm run build &amp;&amp; OPENCENTER_ADMIN_PASSWORD="change-me" node dist/src/cli.js serve --seed</code>
           </div>
         </section>
       </main>
 
       <footer class="site-footer">
         <div class="footer-inner">
-          <div id="footer-copy">open-center-os — MIT Single-Branch Free ($0) Operations System</div>
-          <div><span id="footer-support-lbl">Support:</span> <a href="mailto:apexhive.hq@proton.me">apexhive.hq@proton.me</a></div>
+          <div id="footer-copy">open-center-os — 100% Free Multi-Branch MIT Operations OS</div>
+          <div><span id="footer-support-lbl">Support:</span> <a href="mailto:apexhive.hq@proton.me">apexhive.hq@proton.me</a> · Tip (Base USDC): <code>0x32eceaC45DBED9E555dAb80346aBd4Ab9C676206</code></div>
         </div>
       </footer>
     </div>

@@ -1,22 +1,3 @@
-export type OpenCenterTier = 'sponsor15' | 'sponsor49' | 'team' | 'chain';
-
-export interface OpenCenterLicensePayload {
-  v: 1;
-  product: 'open-center-os';
-  tier: OpenCenterTier;
-  maxBranches?: number | null;
-  payer: string;
-  txHash: string;
-  issuedAt: number;
-  expiresAt: number | null;
-}
-
-export interface LicenseVerificationResult {
-  valid: boolean;
-  reason?: string;
-  payload?: OpenCenterLicensePayload;
-}
-
 export interface BranchRecord {
   id: string;
   code: string;

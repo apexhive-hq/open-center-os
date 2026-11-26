@@ -323,24 +323,8 @@ export class OpenCenterDb {
   }
 
   createBranch(
-    input: { code: string; name: string; nameZh?: string; address?: string; currency?: string },
-    maxAllowedBranches: number | null
+    input: { code: string; name: string; nameZh?: string; address?: string; currency?: string }
   ): BranchRecord {
-    const activeCount = this.countActiveBranches();
-    if (maxAllowedBranches !== null && activeCount >= maxAllowedBranches) {
-      if (activeCount >= 3) {
-        throw new DomainError(
-          402,
-          'CHAIN_LICENSE_REQUIRED',
-          'Growth Team license supports up to 3 branches. Creating 4+ branches requires an offline Ed25519 Chain license (999 USDC lifetime on Base).'
-        );
-      }
-      throw new DomainError(
-        402,
-        'MULTI_BRANCH_LICENSE_REQUIRED',
-        'Single-branch operation is free forever under MIT ($0). Creating 2-3 branches requires a Team license (499 USDC), or 4+ branches requires Chain (999 USDC).'
-      );
-    }
     const id = makeId('br');
     const createdAt = new Date().toISOString();
     const record: BranchRecord = {

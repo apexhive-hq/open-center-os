@@ -1,22 +1,19 @@
 import type { OpenCenterDb } from './db.js';
 
 /**
- * Seeds a realistic single-branch Hong Kong learning center & studio dataset
- * if no active branches exist yet. Stays 100% within $0 MIT single-branch limits.
+ * Seeds a realistic Hong Kong learning center & studio dataset
+ * if no active branches exist yet. 100% free multi-branch MIT.
  */
 export function seedDemoData(db: OpenCenterDb): boolean {
   if (db.countActiveBranches() > 0) return false;
 
-  const br = db.createBranch(
-    {
-      code: 'CWB',
-      name: 'Causeway Bay Studio',
-      nameZh: '銅鑼灣旗艦教室',
-      address: '12/F Yee Wo Street, Causeway Bay, HK',
-      currency: 'HKD'
-    },
-    1
-  );
+  const br = db.createBranch({
+    code: 'CWB',
+    name: 'Causeway Bay Studio',
+    nameZh: '銅鑼灣旗艦教室',
+    address: '12/F Yee Wo Street, Causeway Bay, HK',
+    currency: 'HKD'
+  });
 
   const piano = db.createCourse({
     branchId: br.id,
