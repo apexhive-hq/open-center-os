@@ -15,7 +15,7 @@ function main() {
   const sub = args[0];
 
   if (sub === 'help' || sub === '--help' || sub === '-h') {
-    console.log(`open-center-os — Free MIT Multi-Branch Operations Server
+    console.log(`open-center-os — Self-Hosted Multi-Branch Operations ERP (MIT)
 
 Usage:
   open-center-os serve [--host 127.0.0.1] [--port 3800] [--data-dir ./data] [--seed] [--admin-password <pw>]

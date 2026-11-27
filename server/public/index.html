@@ -43,7 +43,7 @@
         </button>
         <button class="nav-item" type="button" data-view="licensing">
           <span class="nav-dot"></span>
-          <span id="nav-lbl-licensing">Branches &amp; MIT Self-Host</span>
+          <span id="nav-lbl-licensing">Branches &amp; Self-Hosting</span>
         </button>
       </nav>
 
@@ -59,7 +59,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <button id="sidebar-toggle-btn" class="btn btn-sm mobile-only" type="button" aria-label="Toggle menu">Menu</button>
-          <span id="hero-pill" class="badge-pill">100% Free Multi-Branch MIT</span>
+          <span id="hero-pill" class="badge-pill">Multi-Branch Operations</span>
           <div class="branch-switcher">
             <label id="branch-select-lbl" for="branch-select" class="sr-only">Active Branch</label>
             <select id="branch-select" class="text-input compact-select"></select>
@@ -369,8 +369,8 @@
           <div class="card">
             <div class="card-head">
               <div class="toolbar">
-                <h2 id="branch-heading">Multi-Branch Manager (100% Free Unlimited MIT)</h2>
-                <span id="branch-quota-pill" class="pill pill-ok">Unlimited MIT</span>
+                <h2 id="branch-heading">Multi-Branch Manager</h2>
+                <span id="branch-quota-pill" class="pill pill-ok">Active Branches</span>
               </div>
             </div>
             <form id="branch-add-form" class="inline-form" style="margin-bottom:12px;">
@@ -380,14 +380,14 @@
             </form>
             <div id="branch-list" class="branch-list"></div>
             <div id="branch-license-banner" class="status-box ok" style="margin-top:10px;">
-              Unlimited branches active — 100% free forever under MIT License.
+              Multi-branch operations enabled across all configured locations.
             </div>
           </div>
 
           <div class="card">
-            <h2 id="licensing-heading">Self-Hosting &amp; Security Architecture (MIT)</h2>
+            <h2 id="licensing-heading">Self-Hosting &amp; Security Architecture</h2>
             <p id="licensing-subtitle" class="subtitle">
-              All single-branch and multi-branch operations run 100% unrestricted under MIT using Node 24 built-in node:sqlite, HttpOnly cookie/Bearer admin auth, and locked CORS.
+              Single-branch and multi-branch operations run locally on Node 24 built-in node:sqlite with scrypt admin auth, SQLite-backed session revocation, and locked CORS.
             </p>
             <code class="code-block">cd server &amp;&amp; pnpm install --ignore-scripts &amp;&amp; pnpm run build &amp;&amp; OPENCENTER_ADMIN_PASSWORD="change-me" node dist/src/cli.js serve --seed</code>
           </div>
@@ -396,7 +396,7 @@
 
       <footer class="site-footer">
         <div class="footer-inner">
-          <div id="footer-copy">open-center-os — 100% Free Multi-Branch MIT Operations OS</div>
+          <div id="footer-copy">open-center-os — Multi-Branch Center &amp; Studio Operations OS (MIT)</div>
           <div><span id="footer-support-lbl">Support:</span> <a href="mailto:apexhive.hq@proton.me">apexhive.hq@proton.me</a></div>
         </div>
       </footer>

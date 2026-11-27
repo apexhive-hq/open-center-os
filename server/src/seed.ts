@@ -10,7 +10,7 @@ function offsetIsoDate(deltaDays: number): string {
 
 /**
  * Seeds a realistic Hong Kong learning center & studio dataset
- * if no active branches exist yet. 100% free multi-branch MIT.
+ * if no active branches exist yet.
  */
 export function seedDemoData(db: OpenCenterDb): boolean {
   if (db.countActiveBranches() > 0) return false;

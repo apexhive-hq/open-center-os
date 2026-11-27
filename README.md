@@ -1,6 +1,6 @@
 # open-center-os
 
-**100% Free MIT Multi-Branch SME & Education ERP** — self-hosted operations server (`node:sqlite` on Node >= 24) and trilingual UI (EN/繁中/簡中) with bilingual EN/ZH receipts (`BI Analytics`, `Weekly Timetable & Teacher Roster`, `Multi-Item POS Cart`, `Student & CRM Lead Pipeline`, `ISO QR Pass & Parent Portal`, `Unlimited Free Multi-Branch`) for learning centers, tutoring studios, and appointment-based service businesses.
+Self-hosted multi-branch operations server (`node:sqlite` on Node >= 24) and trilingual UI (EN/繁中/簡中) for learning centers, tutoring studios, and appointment-based service businesses. Run student & CRM trial leads, weekly class timetables & teacher rosters, QR check-in passes, touch POS invoicing & refunds with bilingual EN/ZH receipts, and multi-branch revenue analytics in one self-contained Node + SQLite deployment.
 
 ```
 +-----------------------------------------------------------------------------+
@@ -11,7 +11,7 @@
 |  - BI Analytics & Bar Chart         - CRM Leads (Inquiry -> Trial -> Convert)|
 |  - Weekly Timetable & Roster        - Roster Check-In (Present/Absent/Makeup)|
 |  - Multi-Item POS Cart & Print      - Mark Paid / Void / Refund & INV-No     |
-|  - Unlimited Multi-Branch (MIT)     - qrcode-generator ISO SVG + Portal      |
+|  - Multi-Branch SQLite Store        - qrcode-generator ISO SVG + Portal      |
 +-----------------------------------------------------------------------------+
 ```
 
@@ -24,7 +24,7 @@
 - **Locked CORS:** Wildcard `Access-Control-Allow-Origin: *` is disabled. Same-origin requests matching `Host` and protocol (honoring `x-forwarded-proto` only when `TRUST_PROXY=true`) are permitted; cross-origin access is permitted only for origins explicitly listed in `OPENCENTER_ALLOWED_ORIGINS`.
 - **Public Read-Only Endpoints:** `/api/health`, `/api/config`, `/api/auth/me`, `/api/portal/:passCode` (rate-limited; masked contact + credit balance only), and `/api/pass/:passCode.svg` (rendered strictly from authentic database pass records with 128-bit `passCode` entropy).
 
-## Quickstart (`MIT` Free Forever)
+## Quickstart
 
 Requires **Node >= 24.0.0** (uses built-in unflagged `node:sqlite`; matches `engines.node` in `server/package.json` and `node:24-slim` in `Dockerfile`).
 
